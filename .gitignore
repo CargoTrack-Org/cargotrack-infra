@@ -1,0 +1,47 @@
+# ── Terraform state ───────────────────────────────────────────────────────────
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+errored.tfstate
+crash.log
+crash.*.log
+
+# ── Terraform lock & plans ────────────────────────────────────────────────────
+# .terraform.lock.hcl is intentionally COMMITTED (pin provider versions)
+tfplan
+tfplan-*
+*.tfplan
+newplan
+plan.txt
+plan*.txt
+
+# ── Terraform variable files (may contain secrets) ───────────────────────────
+# terraform.tfvars IS committed (non-sensitive defaults)
+*.auto.tfvars
+secrets.tfvars
+
+# ── Override files ────────────────────────────────────────────────────────────
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ── Environment ───────────────────────────────────────────────────────────────
+.env
+.env.*
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── AWS credentials ───────────────────────────────────────────────────────────
+.aws/
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.bak
+*.swp

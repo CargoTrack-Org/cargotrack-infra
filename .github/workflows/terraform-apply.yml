@@ -1,0 +1,178 @@
+name: Terraform — Validate, Plan & Apply
+
+# ─── Triggers ─────────────────────────────────────────────────────────────────
+# This workflow lives in cargotrack-infra repo.
+# Triggers on changes to any .tf file or the workflow itself.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cargotrack-infra/**'
+      - '.github/workflows/terraform-apply.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cargotrack-infra/**'
+  workflow_dispatch:
+
+# ─── Permissions ──────────────────────────────────────────────────────────────
+permissions:
+  id-token: write        # OIDC → AWS
+  contents: read
+  pull-requests: write   # Post plan output as PR comment
+  security-events: write # Upload tfsec SARIF
+
+env:
+  TF_WORKING_DIR: cargotrack-infra/environments/dev
+  AWS_REGION: us-east-1
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════════
+  # JOB 1: tfsec — Terraform security scan
+  # ════════════════════════════════════════════════════════════════════════════
+  tfsec:
+    name: tfsec Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install tfsec
+        run: |
+          curl -sL \
+            https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 \
+            -o /usr/local/bin/tfsec
+          chmod +x /usr/local/bin/tfsec
+          tfsec --version
+
+      - name: Run tfsec and write SARIF to disk
+        run: |
+          tfsec cargotrack-infra \
+            --format sarif \
+            --soft-fail \
+            --exclude-downloaded-modules \
+            --minimum-severity MEDIUM \
+            --out results.sarif || true
+          ls -la results.sarif
+
+      - name: Upload tfsec SARIF to GitHub Security tab
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif
+          category: tfsec
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # JOB 2: Terraform Validate & Plan
+  # ════════════════════════════════════════════════════════════════════════════
+  terraform-plan:
+    name: Terraform Validate & Plan
+    runs-on: ubuntu-latest
+    needs: [tfsec]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_INFRA_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false
+
+      - name: Terraform Format Check
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          terraform plan \
+            -input=false \
+            -no-color \
+            -refresh=false \
+            -lock=false \
+            2>&1 | tee plan_output.txt
+          echo "exitcode=$?" >> $GITHUB_OUTPUT
+
+      - name: Post plan as PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('${{ env.TF_WORKING_DIR }}/plan_output.txt', 'utf8');
+            const truncated = plan.length > 60000
+              ? plan.substring(0, 60000) + '\n\n... [truncated — see Actions logs for full output]'
+              : plan;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan — \`cargotrack-infra/environments/dev\`\n\n\`\`\`hcl\n${truncated}\n\`\`\``
+            });
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # JOB 3: Terraform Apply — requires manual approval via GitHub Environment
+  #
+  # HOW THE APPROVAL GATE WORKS:
+  #   1. This job targets the "production" GitHub Environment
+  #   2. Go to cargotrack-infra repo → Settings → Environments → production
+  #   3. Add "Required reviewers" (your GitHub username)
+  #   4. When this job is reached, GitHub pauses and emails you for approval
+  #   5. Approve in the GitHub UI → terraform apply runs
+  #
+  # Only runs on push to main (not on PRs — PRs only plan).
+  # ════════════════════════════════════════════════════════════════════════════
+  terraform-apply:
+    name: Terraform Apply (requires approval)
+    runs-on: ubuntu-latest
+    needs: [terraform-plan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production   # ← This is the manual approval gate
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_INFRA_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform apply \
+            -input=false \
+            -auto-approve
+          echo "✅ Terraform apply complete"
