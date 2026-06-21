@@ -9,8 +9,9 @@ locals {
   # Strip the https:// prefix from the OIDC issuer URL for use in condition keys
   oidc_host = replace(var.oidc_issuer_url, "https://", "")
 
-  # Service account namespace — all microservices live here
-  namespace = "cargotrack"
+  # Service account namespace — microservices live in both dev and prod namespaces
+  # Both namespaces are trusted in the OIDC conditions (explicit list, not wildcard)
+  namespaces = ["cargotrack-dev", "cargotrack-prod"]
 
   # Map of service names to their Kubernetes service account names
   # Keys must match the Helm chart serviceAccount.name values exactly
@@ -37,7 +38,11 @@ data "aws_iam_policy_document" "core_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
-      values   = ["system:serviceaccount:${local.namespace}:${local.services.core_service}"]
+      # Trust core-service SA in BOTH namespaces (dev + prod, same cluster)
+      values = [
+        "system:serviceaccount:cargotrack-dev:${local.services.core_service}",
+        "system:serviceaccount:cargotrack-prod:${local.services.core_service}",
+      ]
     }
     condition {
       test     = "StringEquals"
@@ -58,7 +63,11 @@ data "aws_iam_policy_document" "document_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
-      values   = ["system:serviceaccount:${local.namespace}:${local.services.document_service}"]
+      # Trust document-service SA in BOTH namespaces (dev + prod, same cluster)
+      values = [
+        "system:serviceaccount:cargotrack-dev:${local.services.document_service}",
+        "system:serviceaccount:cargotrack-prod:${local.services.document_service}",
+      ]
     }
     condition {
       test     = "StringEquals"
@@ -79,7 +88,11 @@ data "aws_iam_policy_document" "ai_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
-      values   = ["system:serviceaccount:${local.namespace}:${local.services.ai_service}"]
+      # Trust ai-service SA in BOTH namespaces (dev + prod, same cluster)
+      values = [
+        "system:serviceaccount:cargotrack-dev:${local.services.ai_service}",
+        "system:serviceaccount:cargotrack-prod:${local.services.ai_service}",
+      ]
     }
     condition {
       test     = "StringEquals"
@@ -479,4 +492,79 @@ resource "aws_iam_role_policy" "cluster_autoscaler" {
   name   = "${var.project_name}-cluster-autoscaler-policy"
   role   = aws_iam_role.cluster_autoscaler.id
   policy = data.aws_iam_policy_document.cluster_autoscaler.json
+}
+
+# ─── External Secrets Operator (ESO) IRSA ────────────────────────────────────
+# ESO runs in the external-secrets namespace and uses this role to read secrets
+# from AWS Secrets Manager and configuration values from SSM Parameter Store.
+# The role is scoped to the ESO controller ServiceAccount (least privilege).
+#
+# ESO uses IRSA — no static credentials required in the cluster.
+# The ClusterSecretStore CR (in k8s.tf) references this ServiceAccount.
+
+data "aws_iam_policy_document" "eso_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    effect  = "Allow"
+    principals {
+      type        = "Federated"
+      identifiers = [var.oidc_provider_arn]
+    }
+    # Trust the ESO controller ServiceAccount in the external-secrets namespace
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_host}:sub"
+      values   = ["system:serviceaccount:external-secrets:external-secrets"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_host}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "eso" {
+  name               = "${var.project_name}-irsa-eso"
+  assume_role_policy = data.aws_iam_policy_document.eso_assume.json
+  tags               = merge(local.common_tags, { Service = "external-secrets-operator" })
+}
+
+data "aws_iam_policy_document" "eso" {
+  # Read all CargoTrack secrets from Secrets Manager
+  # Scoped to cargotrack-* secrets only — no other secrets can be read
+  statement {
+    sid     = "SecretsManagerRead"
+    actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [
+      "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:cargotrack-*",
+    ]
+  }
+
+  # Read all CargoTrack operational config from SSM Parameter Store
+  # Scoped to /cargotrack/* hierarchy only
+  statement {
+    sid = "SSMParameterRead"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:GetParametersByPath",
+    ]
+    resources = [
+      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/cargotrack/*",
+    ]
+  }
+
+  # KMS: decrypt Secrets Manager values encrypted with the CargoTrack CMK
+  statement {
+    sid       = "KMSDecrypt"
+    actions   = ["kms:Decrypt"]
+    resources = [var.kms_key_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "eso" {
+  name   = "${var.project_name}-eso-policy"
+  role   = aws_iam_role.eso.id
+  policy = data.aws_iam_policy_document.eso.json
 }

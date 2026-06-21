@@ -10,6 +10,12 @@ variable "project_name" {
   default     = "cargotrack"
 }
 
+variable "environment" {
+  description = "Deployment environment (dev, staging, prod) — used for resource tagging"
+  type        = string
+  default     = "dev"
+}
+
 variable "vpc_cidr" {
   description = "CIDR block for the VPC"
   type        = string

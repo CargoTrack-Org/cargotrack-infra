@@ -22,3 +22,8 @@ output "cluster_autoscaler_role_arn" {
   description = "IAM role ARN for the Cluster Autoscaler service account (kube-system:cluster-autoscaler)"
   value       = aws_iam_role.cluster_autoscaler.arn
 }
+
+output "eso_role_arn" {
+  description = "IAM role ARN for the External Secrets Operator service account (external-secrets:external-secrets). Used to annotate the ESO Helm chart ServiceAccount for IRSA — no static credentials required."
+  value       = aws_iam_role.eso.arn
+}

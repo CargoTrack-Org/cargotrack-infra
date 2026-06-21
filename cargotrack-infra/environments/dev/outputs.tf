@@ -148,49 +148,97 @@ output "argocd_namespace" {
   value       = kubernetes_namespace.argocd.metadata[0].name
 }
 
-output "cargotrack_namespace" {
-  description = "Namespace where CargoTrack application pods run"
-  value       = kubernetes_namespace.cargotrack.metadata[0].name
+output "cargotrack_dev_namespace" {
+  description = "Dev namespace where CargoTrack dev pods run"
+  value       = kubernetes_namespace.cargotrack_dev.metadata[0].name
+}
+
+output "cargotrack_prod_namespace" {
+  description = "Prod namespace where CargoTrack prod pods run"
+  value       = kubernetes_namespace.cargotrack_prod.metadata[0].name
+}
+
+output "eso_controller_version" {
+  description = "Installed External Secrets Operator version"
+  value       = helm_release.external_secrets.version
+}
+
+output "guardduty_detector_id" {
+  description = "AWS GuardDuty detector ID"
+  value       = module.guardduty.detector_id
+}
+
+output "guardduty_findings_rule_arn" {
+  description = "EventBridge rule ARN for high-severity GuardDuty findings"
+  value       = module.guardduty.findings_event_rule_arn
+}
+
+output "irsa_eso_role_arn" {
+  description = "IRSA role ARN for External Secrets Operator — annotated on the ESO Helm chart ServiceAccount"
+  value       = module.irsa.eso_role_arn
+}
+
+output "ssm_path_prefix" {
+  description = "SSM Parameter Store prefix for configuration"
+  value       = "/cargotrack/"
 }
 
 output "platform_note" {
   description = "Post-apply steps required to complete GitOps bootstrap"
   value       = <<-EOT
-    ── Post-apply steps ──────────────────────────────────────────────────────
-    1. Get ArgoCD initial admin password:
+    ── Post-apply steps ─────────────────────────────────────────────────────────
+    1. Configure kubectl:
+         aws eks update-kubeconfig --name <eks_cluster_name> --region us-east-1
+
+    2. Get ArgoCD initial admin password:
          kubectl -n argocd get secret argocd-initial-admin-secret \
            -o jsonpath="{.data.password}" | base64 -d
 
-    2. Get ArgoCD server URL (LoadBalancer):
-         kubectl get svc argocd-server -n argocd \
-           -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"
+    3. Verify dev + prod namespaces:
+         kubectl get ns | grep cargotrack
 
-    3. Verify cargotrack-secrets was created by Terraform:
-         kubectl get secret cargotrack-secrets -n cargotrack
+    4. Verify ESO ClusterSecretStores are READY:
+         kubectl get clustersecretstore
 
-    4. Once ArgoCD syncs and the Ingress is created, get the ALB DNS name:
-         kubectl get ingress -n cargotrack
+    5. Verify ExternalSecrets are READY (ESO synced to Secrets Manager):
+         kubectl get externalsecret -n cargotrack-dev
+         kubectl get externalsecret -n cargotrack-prod
 
-    5. Wire CloudFront to the ALB:
-         ALB DNS is now baked into variables.tf — no -var flag needed.
-         Just run: terraform apply
+    6. Verify ArgoCD Applications synced:
+         kubectl get application -n argocd
 
-    6. Domain is configured: shopp-novaa.co.in
-         After apply, copy the NS records from dns_name_servers output
-         to your registrar at shopp-novaa.co.in → change nameservers.
-    ─────────────────────────────────────────────────────────────────────────
+    7. Once ArgoCD syncs and Ingress is created, get ALB DNS:
+         kubectl get ingress -n cargotrack-dev
+         kubectl get ingress -n cargotrack-prod
+
+    8. GuardDuty detector is active — verify in AWS Console:
+         Security > GuardDuty > Findings
+
+    9. SSM Parameters are populated under /cargotrack/dev/:
+         aws ssm get-parameters-by-path --path /cargotrack/dev/ --recursive
+    ─────────────────────────────────────────────────────────────────────
   EOT
 }
 
 output "cargotrack_secrets_note" {
-  description = "How cargotrack-secrets is created — no ESO, no manual steps"
+  description = "How cargotrack-secrets is managed — Terraform bootstrap + ESO live ownership"
   value       = <<-EOT
-    cargotrack-secrets is created directly by Terraform as a kubernetes_secret resource.
-    Values are sourced from AWS Secrets Manager via data.aws_secretsmanager_secret_version,
-    which reads the same random_password values that module.database wrote.
-    No External Secrets Operator, no CRD bootstrap issue, single terraform apply.
+    BOOTSTRAP (apply day 0):
+      Terraform creates kubernetes_secret 'cargotrack-secrets' in both
+      cargotrack-dev and cargotrack-prod namespaces directly from AWS Secrets Manager.
+      Pods start immediately — no ESO reconcile wait.
 
-    Keys in cargotrack-secrets:
+    LONG-TERM OWNERSHIP (after ESO reconciles, ~30s post-apply):
+      ExternalSecret CRs (cargotrack-dev + cargotrack-prod) with creationPolicy=Merge
+      take over synchronization. ESO reads Secrets Manager every 1h and updates the
+      kubernetes_secret automatically. Secret rotation requires zero Terraform applies.
+
+    DESTROY SAFETY:
+      ExternalSecret CRs use deletionPolicy=Retain — ESO does not delete the K8s
+      secret when its CR is removed. Terraform then deletes the kubernetes_secret.
+      No double-delete race condition.
+
+    Keys in cargotrack-secrets (both namespaces):
       DATABASE_PASSWORD  <- cargotrack-database-secret-v2  .password
       JWT_SECRET         <- cargotrack-application-secret-v2 .jwt_secret
       ADMIN_PASSWORD     <- cargotrack-application-secret-v2 .admin_password

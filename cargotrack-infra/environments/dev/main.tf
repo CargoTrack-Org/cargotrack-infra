@@ -327,4 +327,166 @@ module "ecr" {
   eks_node_role_arn = module.eks.node_role_arn
 }
 
+# ── GUARDDUTY ─────────────────────────────────────────────────────────────────
+# Threat detection: CloudTrail analysis, VPC Flow Logs, EKS audit logs,
+# S3 data protection, malware scanning on EKS workloads.
+# HIGH/CRITICAL findings (severity >= 7) route to SNS → email if alarm_email is set.
+
+module "guardduty" {
+
+  source = "../../modules/guardduty"
+
+  project_name = var.project_name
+  alarm_email  = var.alarm_email
+  kms_key_arn  = module.database.kms_key_arn
+}
+
+# ── SSM PARAMETER STORE — Operational Configuration ──────────────────────────
+#
+# DESIGN RATIONALE:
+#   All non-sensitive operational configuration is stored in SSM Parameter Store.
+#   This provides:
+#   - Centralized config management (no hardcoded values in Kubernetes manifests)
+#   - Audit trail (CloudTrail tracks all GetParameter calls)
+#   - IAM-scoped access (ESO and services read /cargotrack/* only)
+#   - Change management (config changes visible in SSM console, not just Terraform state)
+#   - Future readiness (services can read config directly via SSM SDK if needed)
+#
+# SENSITIVE VALUES are NOT stored here. Database password, JWT secret, and admin
+# password remain in AWS Secrets Manager (module.database) and are synced to
+# Kubernetes via ESO ExternalSecret → kubernetes_secret.
+#
+# HIERARCHY: /cargotrack/{environment}/{category}/{key}
+# ESO's IRSA policy grants ssm:GetParameter on arn:...:parameter/cargotrack/*
+
+resource "aws_ssm_parameter" "db_host" {
+  name  = "/cargotrack/${var.environment}/database/host"
+  type  = "String"
+  value = split(":", module.database.db_endpoint)[0]
+
+  description = "CargoTrack RDS PostgreSQL hostname (port stripped)"
+  tags = {
+    Category = "database"
+    Service  = "rds"
+  }
+}
+
+resource "aws_ssm_parameter" "db_port" {
+  name  = "/cargotrack/${var.environment}/database/port"
+  type  = "String"
+  value = "5432"
+
+  description = "CargoTrack RDS PostgreSQL port"
+  tags = {
+    Category = "database"
+    Service  = "rds"
+  }
+}
+
+resource "aws_ssm_parameter" "db_name" {
+  name  = "/cargotrack/${var.environment}/database/name"
+  type  = "String"
+  value = "cargotrack"
+
+  description = "CargoTrack PostgreSQL database name"
+  tags = {
+    Category = "database"
+    Service  = "rds"
+  }
+}
+
+resource "aws_ssm_parameter" "db_user" {
+  name  = "/cargotrack/${var.environment}/database/user"
+  type  = "String"
+  value = "cargotrack"
+
+  description = "CargoTrack PostgreSQL database username (non-sensitive)"
+  tags = {
+    Category = "database"
+    Service  = "rds"
+  }
+}
+
+resource "aws_ssm_parameter" "aws_region" {
+  name  = "/cargotrack/${var.environment}/aws/region"
+  type  = "String"
+  value = var.aws_region
+
+  description = "AWS region for CargoTrack services"
+  tags = {
+    Category = "aws"
+  }
+}
+
+resource "aws_ssm_parameter" "s3_bucket" {
+  name  = "/cargotrack/${var.environment}/s3/bucket-name"
+  type  = "String"
+  value = module.storage.bucket_id
+
+  description = "CargoTrack S3 documents bucket name"
+  tags = {
+    Category = "storage"
+    Service  = "s3"
+  }
+}
+
+resource "aws_ssm_parameter" "event_bus_name" {
+  name  = "/cargotrack/${var.environment}/eventbridge/event-bus-name"
+  type  = "String"
+  value = module.eventing.event_bus_name
+
+  description = "CargoTrack EventBridge custom event bus name"
+  tags = {
+    Category = "eventing"
+    Service  = "eventbridge"
+  }
+}
+
+resource "aws_ssm_parameter" "compliance_queue_url" {
+  name  = "/cargotrack/${var.environment}/sqs/compliance-queue-url"
+  type  = "String"
+  value = module.eventing.compliance_queue_url
+
+  description = "SQS compliance trigger queue URL (consumed by ai-service)"
+  tags = {
+    Category = "eventing"
+    Service  = "sqs"
+  }
+}
+
+resource "aws_ssm_parameter" "audit_table_name" {
+  name  = "/cargotrack/${var.environment}/dynamodb/audit-table"
+  type  = "String"
+  value = module.audit.table_name
+
+  description = "DynamoDB audit trail table name"
+  tags = {
+    Category = "database"
+    Service  = "dynamodb"
+  }
+}
+
+resource "aws_ssm_parameter" "db_secret_arn" {
+  name  = "/cargotrack/${var.environment}/secrets/db-secret-arn"
+  type  = "String"
+  value = module.database.db_secret_arn
+
+  description = "ARN of the Secrets Manager secret for RDS credentials (for application self-discovery)"
+  tags = {
+    Category = "secrets"
+    Service  = "secretsmanager"
+  }
+}
+
+resource "aws_ssm_parameter" "app_secret_arn" {
+  name  = "/cargotrack/${var.environment}/secrets/app-secret-arn"
+  type  = "String"
+  value = module.database.application_secret_arn
+
+  description = "ARN of the Secrets Manager secret for app credentials (JWT, admin)"
+  tags = {
+    Category = "secrets"
+    Service  = "secretsmanager"
+  }
+}
 
