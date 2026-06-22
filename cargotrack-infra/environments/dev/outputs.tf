@@ -249,5 +249,9 @@ output "cargotrack_secrets_note" {
 
 output "application_url" {
   description = "Primary application URL — https after DNS delegation, http ALB URL otherwise"
-  value       = var.domain_name != "" ? "https://${var.domain_name}" : "http://${var.eks_ingress_alb_dns}"
+  value = (
+    var.domain_name != "" ? "https://${var.domain_name}" :
+    var.eks_ingress_alb_dns != "" ? "http://${var.eks_ingress_alb_dns}" :
+    "ALB not yet known — run: kubectl get ingress -n cargotrack-dev -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'"
+  )
 }

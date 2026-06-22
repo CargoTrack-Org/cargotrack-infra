@@ -63,17 +63,19 @@ variable "node_desired_size" {
 variable "eks_ingress_alb_dns" {
   description = <<-EOT
     DNS name of the ALB created by the AWS Load Balancer Controller after Helm/ArgoCD deploys the Ingress.
-    This is baked in as the default after the first successful deploy so that future
-    terraform apply runs (including after terraform destroy + apply) have the correct origin.
-
-    To update after a new deploy:
-      kubectl get ingress -n cargotrack -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
-    Then update this default value.
+    Leave empty on first apply — get the value after apply with:
+      kubectl get ingress -n cargotrack-dev -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
   EOT
   type    = string
-  # ── Baked-in default: the ALB created by the first successful EKS + ArgoCD deploy ──
-  # Update this value if the ALB DNS changes (e.g. after terraform destroy + apply).
-  default = "k8s-cargotrack-faafefcd8d-1544623305.us-east-1.elb.amazonaws.com"
+  default = ""  # Leave empty — ALB is created dynamically by the LBC on each apply
+}
+
+# ─── GitHub OIDC ──────────────────────────────────────────────────────────────
+
+variable "github_repository" {
+  description = "GitHub repository in OrgName/RepoName format — scopes the GitHub Actions OIDC trust policy to this repo only"
+  type        = string
+  default     = "CargoTrack-Org/cargotrack-app"
 }
 
 variable "domain_name" {
