@@ -794,14 +794,19 @@ resource "null_resource" "pre_destroy_ingress_cleanup" {
         --region "${self.triggers.aws_region}" \
         --kubeconfig "/tmp/cargotrack-kube-destroy.conf" 2>/dev/null
 
-      for NS in "${self.triggers.ns_dev}" "${self.triggers.ns_prod}"; do
-        echo "[pre-destroy] Deleting Ingress resources in namespace: ${NS}..."
-        KUBECONFIG="/tmp/cargotrack-kube-destroy.conf" \
-          kubectl delete ingress --all \
-            -n "${NS}" \
-            --timeout=120s \
-            --ignore-not-found=true 2>/dev/null || true
-      done
+      echo "[pre-destroy] Deleting Ingress resources in ${self.triggers.ns_dev}..."
+      KUBECONFIG="/tmp/cargotrack-kube-destroy.conf" \
+        kubectl delete ingress --all \
+          -n "${self.triggers.ns_dev}" \
+          --timeout=120s \
+          --ignore-not-found=true 2>/dev/null || true
+
+      echo "[pre-destroy] Deleting Ingress resources in ${self.triggers.ns_prod}..."
+      KUBECONFIG="/tmp/cargotrack-kube-destroy.conf" \
+        kubectl delete ingress --all \
+          -n "${self.triggers.ns_prod}" \
+          --timeout=120s \
+          --ignore-not-found=true 2>/dev/null || true
 
       echo "[pre-destroy] Waiting 30s for ALB deprovisioning..."
       sleep 30
