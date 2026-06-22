@@ -535,40 +535,29 @@ resource "helm_release" "external_secrets" {
 # DESIGN: ClusterSecretStore (not SecretStore) avoids creating duplicate stores
 # per namespace. One store, multiple ExternalSecret CRs across namespaces.
 
-resource "kubernetes_manifest" "cluster_secret_store_sm" {
-  manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
-    kind       = "ClusterSecretStore"
-    metadata = {
-      name = "aws-secrets-manager"
-      labels = {
-        "app.kubernetes.io/managed-by" = "Terraform"
-        "app.kubernetes.io/part-of"    = "cargotrack"
-      }
-    }
-    spec = {
-      provider = {
-        aws = {
-          service = "SecretsManager"
-          region  = var.aws_region
-          auth = {
-            jwt = {
-              serviceAccountRef = {
-                # Reference the ESO controller ServiceAccount that has the IRSA annotation.
-                # ESO exchanges the OIDC token for short-lived AWS credentials via STS.
-                name      = "external-secrets"
-                namespace = "external-secrets"
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+resource "kubectl_manifest" "cluster_secret_store_sm" {
+  yaml_body = <<-YAML
+    apiVersion: external-secrets.io/v1beta1
+    kind: ClusterSecretStore
+    metadata:
+      name: aws-secrets-manager
+      labels:
+        app.kubernetes.io/managed-by: Terraform
+        app.kubernetes.io/part-of: cargotrack
+    spec:
+      provider:
+        aws:
+          service: SecretsManager
+          region: ${var.aws_region}
+          auth:
+            jwt:
+              serviceAccountRef:
+                name: external-secrets
+                namespace: external-secrets
+  YAML
 
-  field_manager {
-    force_conflicts = true
-  }
+  force_conflicts   = true
+  server_side_apply = true
 
   depends_on = [helm_release.external_secrets]
 }
@@ -577,38 +566,29 @@ resource "kubernetes_manifest" "cluster_secret_store_sm" {
 # Separate cluster-wide store for SSM-sourced configuration.
 # The same ESO ServiceAccount (IRSA role) covers both Secrets Manager and SSM.
 
-resource "kubernetes_manifest" "cluster_secret_store_ssm" {
-  manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
-    kind       = "ClusterSecretStore"
-    metadata = {
-      name = "aws-ssm-parameter-store"
-      labels = {
-        "app.kubernetes.io/managed-by" = "Terraform"
-        "app.kubernetes.io/part-of"    = "cargotrack"
-      }
-    }
-    spec = {
-      provider = {
-        aws = {
-          service = "ParameterStore"
-          region  = var.aws_region
-          auth = {
-            jwt = {
-              serviceAccountRef = {
-                name      = "external-secrets"
-                namespace = "external-secrets"
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+resource "kubectl_manifest" "cluster_secret_store_ssm" {
+  yaml_body = <<-YAML
+    apiVersion: external-secrets.io/v1beta1
+    kind: ClusterSecretStore
+    metadata:
+      name: aws-ssm-parameter-store
+      labels:
+        app.kubernetes.io/managed-by: Terraform
+        app.kubernetes.io/part-of: cargotrack
+    spec:
+      provider:
+        aws:
+          service: ParameterStore
+          region: ${var.aws_region}
+          auth:
+            jwt:
+              serviceAccountRef:
+                name: external-secrets
+                namespace: external-secrets
+  YAML
 
-  field_manager {
-    force_conflicts = true
-  }
+  force_conflicts   = true
+  server_side_apply = true
 
   depends_on = [helm_release.external_secrets]
 }
@@ -629,62 +609,46 @@ resource "kubernetes_manifest" "cluster_secret_store_ssm" {
 #   When Secrets Manager auto-rotates a secret, the updated value propagates to
 #   the Kubernetes secret within 1 hour — no Terraform apply required.
 
-resource "kubernetes_manifest" "external_secret_dev" {
-  manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
-    kind       = "ExternalSecret"
-    metadata = {
-      name      = "cargotrack-secrets-sync"
-      namespace = "cargotrack-dev"
-      labels = {
-        "app.kubernetes.io/managed-by" = "Terraform"
-        "app.kubernetes.io/part-of"    = "cargotrack"
-        environment                    = "dev"
-      }
-    }
-    spec = {
-      refreshInterval = "1h"
-      secretStoreRef = {
-        name = "aws-secrets-manager"
-        kind = "ClusterSecretStore"
-      }
-      target = {
-        name           = "cargotrack-secrets"
-        creationPolicy = "Merge"
-        deletionPolicy = "Retain"
-      }
-      data = [
-        {
-          secretKey = "DATABASE_PASSWORD"
-          remoteRef = {
-            key      = "cargotrack-database-secret-v2"
-            property = "password"
-          }
-        },
-        {
-          secretKey = "JWT_SECRET"
-          remoteRef = {
-            key      = "cargotrack-application-secret-v2"
-            property = "jwt_secret"
-          }
-        },
-        {
-          secretKey = "ADMIN_PASSWORD"
-          remoteRef = {
-            key      = "cargotrack-application-secret-v2"
-            property = "admin_password"
-          }
-        },
-      ]
-    }
-  }
+resource "kubectl_manifest" "external_secret_dev" {
+  yaml_body = <<-YAML
+    apiVersion: external-secrets.io/v1beta1
+    kind: ExternalSecret
+    metadata:
+      name: cargotrack-secrets-sync
+      namespace: cargotrack-dev
+      labels:
+        app.kubernetes.io/managed-by: Terraform
+        app.kubernetes.io/part-of: cargotrack
+        environment: dev
+    spec:
+      refreshInterval: 1h
+      secretStoreRef:
+        name: aws-secrets-manager
+        kind: ClusterSecretStore
+      target:
+        name: cargotrack-secrets
+        creationPolicy: Merge
+        deletionPolicy: Retain
+      data:
+        - secretKey: DATABASE_PASSWORD
+          remoteRef:
+            key: cargotrack-database-secret-v2
+            property: password
+        - secretKey: JWT_SECRET
+          remoteRef:
+            key: cargotrack-application-secret-v2
+            property: jwt_secret
+        - secretKey: ADMIN_PASSWORD
+          remoteRef:
+            key: cargotrack-application-secret-v2
+            property: admin_password
+  YAML
 
-  field_manager {
-    force_conflicts = true
-  }
+  force_conflicts   = true
+  server_side_apply = true
 
   depends_on = [
-    kubernetes_manifest.cluster_secret_store_sm,
+    kubectl_manifest.cluster_secret_store_sm,
     kubernetes_secret.cargotrack_secrets_dev,
     kubernetes_namespace.cargotrack_dev,
   ]
@@ -695,62 +659,46 @@ resource "kubernetes_manifest" "external_secret_dev" {
 # different target namespace. Both environments share the same secrets for this
 # single-cluster evaluation setup.
 
-resource "kubernetes_manifest" "external_secret_prod" {
-  manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
-    kind       = "ExternalSecret"
-    metadata = {
-      name      = "cargotrack-secrets-sync"
-      namespace = "cargotrack-prod"
-      labels = {
-        "app.kubernetes.io/managed-by" = "Terraform"
-        "app.kubernetes.io/part-of"    = "cargotrack"
-        environment                    = "prod"
-      }
-    }
-    spec = {
-      refreshInterval = "1h"
-      secretStoreRef = {
-        name = "aws-secrets-manager"
-        kind = "ClusterSecretStore"
-      }
-      target = {
-        name           = "cargotrack-secrets"
-        creationPolicy = "Merge"
-        deletionPolicy = "Retain"
-      }
-      data = [
-        {
-          secretKey = "DATABASE_PASSWORD"
-          remoteRef = {
-            key      = "cargotrack-database-secret-v2"
-            property = "password"
-          }
-        },
-        {
-          secretKey = "JWT_SECRET"
-          remoteRef = {
-            key      = "cargotrack-application-secret-v2"
-            property = "jwt_secret"
-          }
-        },
-        {
-          secretKey = "ADMIN_PASSWORD"
-          remoteRef = {
-            key      = "cargotrack-application-secret-v2"
-            property = "admin_password"
-          }
-        },
-      ]
-    }
-  }
+resource "kubectl_manifest" "external_secret_prod" {
+  yaml_body = <<-YAML
+    apiVersion: external-secrets.io/v1beta1
+    kind: ExternalSecret
+    metadata:
+      name: cargotrack-secrets-sync
+      namespace: cargotrack-prod
+      labels:
+        app.kubernetes.io/managed-by: Terraform
+        app.kubernetes.io/part-of: cargotrack
+        environment: prod
+    spec:
+      refreshInterval: 1h
+      secretStoreRef:
+        name: aws-secrets-manager
+        kind: ClusterSecretStore
+      target:
+        name: cargotrack-secrets
+        creationPolicy: Merge
+        deletionPolicy: Retain
+      data:
+        - secretKey: DATABASE_PASSWORD
+          remoteRef:
+            key: cargotrack-database-secret-v2
+            property: password
+        - secretKey: JWT_SECRET
+          remoteRef:
+            key: cargotrack-application-secret-v2
+            property: jwt_secret
+        - secretKey: ADMIN_PASSWORD
+          remoteRef:
+            key: cargotrack-application-secret-v2
+            property: admin_password
+  YAML
 
-  field_manager {
-    force_conflicts = true
-  }
+  force_conflicts   = true
+  server_side_apply = true
 
   depends_on = [
-    kubernetes_manifest.cluster_secret_store_sm,
+    kubectl_manifest.cluster_secret_store_sm,
     kubernetes_secret.cargotrack_secrets_prod,
     kubernetes_namespace.cargotrack_prod,
   ]
@@ -835,100 +783,67 @@ resource "null_resource" "pre_destroy_ingress_cleanup" {
 # Helm chart templates render all resources in the correct namespace without
 # requiring changes to the values files in the cargotrack-helm repo.
 
-resource "kubernetes_manifest" "cargotrack_dev_app" {
-  manifest = {
-    apiVersion = "argoproj.io/v1alpha1"
-    kind       = "Application"
-    metadata = {
-      name      = "cargotrack-dev"
-      namespace = "argocd"
-      # finalizers intentionally omitted — see null_resource.pre_destroy_ingress_cleanup
-    }
-    spec = {
-      project = "default"
-      source = {
-        repoURL        = "https://github.com/CargoTrack-Org/cargotrack-helm.git"
-        targetRevision = "main"
-        path           = "cargotrack"
-        helm = {
-          valueFiles = [
-            "values.yaml",
-            "values-dev.yaml",
-          ]
-          parameters = [
-            # Namespace injection — tells Helm chart which namespace to deploy into
-            {
-              name  = "global.namespace"
-              value = "cargotrack-dev"
-            },
-            {
-              name  = "global.environment"
-              value = "dev"
-            },
-            # IRSA role ARNs — injected by Terraform from module outputs
-            {
-              name  = "coreService.serviceAccount.roleArn"
-              value = module.irsa.core_service_role_arn
-            },
-            {
-              name  = "documentService.serviceAccount.roleArn"
-              value = module.irsa.document_service_role_arn
-            },
-            {
-              name  = "aiService.serviceAccount.roleArn"
-              value = module.irsa.ai_service_role_arn
-            },
-            # AI configuration — real Bedrock in dev
-            {
-              name  = "aiService.env.MOCK_AGENT"
-              value = "false"
-            },
-            {
-              name  = "aiService.env.TEXTRACT_ENABLED"
-              value = "true"
-            },
-            {
-              name  = "aiService.env.LLM_PROVIDER"
-              value = "bedrock"
-            },
-          ]
-        }
-      }
-      destination = {
-        server    = "https://kubernetes.default.svc"
-        namespace = "cargotrack-dev"
-      }
-      syncPolicy = {
-        automated = {
-          prune    = true
-          selfHeal = true
-        }
-        syncOptions = [
-          "CreateNamespace=false", # Namespace already created by Terraform above
-          "ServerSideApply=true",
-        ]
-        retry = {
-          limit = 3
-          backoff = {
-            duration    = "5s"
-            maxDuration = "3m"
-            factor      = 2
-          }
-        }
-      }
-    }
-  }
+resource "kubectl_manifest" "cargotrack_dev_app" {
+  yaml_body = <<-YAML
+    apiVersion: argoproj.io/v1alpha1
+    kind: Application
+    metadata:
+      name: cargotrack-dev
+      namespace: argocd
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/CargoTrack-Org/cargotrack-helm.git
+        targetRevision: main
+        path: cargotrack
+        helm:
+          valueFiles:
+            - values.yaml
+            - values-dev.yaml
+          parameters:
+            - name: global.namespace
+              value: cargotrack-dev
+            - name: global.environment
+              value: dev
+            - name: coreService.serviceAccount.roleArn
+              value: ${module.irsa.core_service_role_arn}
+            - name: documentService.serviceAccount.roleArn
+              value: ${module.irsa.document_service_role_arn}
+            - name: aiService.serviceAccount.roleArn
+              value: ${module.irsa.ai_service_role_arn}
+            - name: aiService.env.MOCK_AGENT
+              value: "false"
+            - name: aiService.env.TEXTRACT_ENABLED
+              value: "true"
+            - name: aiService.env.LLM_PROVIDER
+              value: bedrock
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: cargotrack-dev
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 5s
+            maxDuration: 3m
+            factor: 2
+  YAML
 
-  field_manager {
-    force_conflicts = true
-  }
+  force_conflicts   = true
+  server_side_apply = true
 
   depends_on = [
     helm_release.argocd,
     kubernetes_namespace.cargotrack_dev,
     kubernetes_config_map.cargotrack_aws_config_dev,
     kubernetes_secret.cargotrack_secrets_dev,
-    kubernetes_manifest.external_secret_dev,
+    kubectl_manifest.external_secret_dev,
     module.irsa,
   ]
 }
@@ -938,100 +853,67 @@ resource "kubernetes_manifest" "cargotrack_dev_app" {
 # Uses values-prod.yaml overrides (higher replica counts, prod-grade settings).
 # Bedrock and Textract are enabled for prod — real AI compliance checks.
 
-resource "kubernetes_manifest" "cargotrack_prod_app" {
-  manifest = {
-    apiVersion = "argoproj.io/v1alpha1"
-    kind       = "Application"
-    metadata = {
-      name      = "cargotrack-prod"
-      namespace = "argocd"
-      # finalizers intentionally omitted — see null_resource.pre_destroy_ingress_cleanup
-    }
-    spec = {
-      project = "default"
-      source = {
-        repoURL        = "https://github.com/CargoTrack-Org/cargotrack-helm.git"
-        targetRevision = "main"
-        path           = "cargotrack"
-        helm = {
-          valueFiles = [
-            "values.yaml",
-            "values-prod.yaml",
-          ]
-          parameters = [
-            # Namespace injection
-            {
-              name  = "global.namespace"
-              value = "cargotrack-prod"
-            },
-            {
-              name  = "global.environment"
-              value = "prod"
-            },
-            # IRSA role ARNs — same roles as dev (trust policy covers both namespaces)
-            {
-              name  = "coreService.serviceAccount.roleArn"
-              value = module.irsa.core_service_role_arn
-            },
-            {
-              name  = "documentService.serviceAccount.roleArn"
-              value = module.irsa.document_service_role_arn
-            },
-            {
-              name  = "aiService.serviceAccount.roleArn"
-              value = module.irsa.ai_service_role_arn
-            },
-            # AI configuration — full Bedrock + Textract in prod
-            {
-              name  = "aiService.env.MOCK_AGENT"
-              value = "false"
-            },
-            {
-              name  = "aiService.env.TEXTRACT_ENABLED"
-              value = "true"
-            },
-            {
-              name  = "aiService.env.LLM_PROVIDER"
-              value = "bedrock"
-            },
-          ]
-        }
-      }
-      destination = {
-        server    = "https://kubernetes.default.svc"
-        namespace = "cargotrack-prod"
-      }
-      syncPolicy = {
-        automated = {
-          prune    = true
-          selfHeal = true
-        }
-        syncOptions = [
-          "CreateNamespace=false",
-          "ServerSideApply=true",
-        ]
-        retry = {
-          limit = 3
-          backoff = {
-            duration    = "5s"
-            maxDuration = "3m"
-            factor      = 2
-          }
-        }
-      }
-    }
-  }
+resource "kubectl_manifest" "cargotrack_prod_app" {
+  yaml_body = <<-YAML
+    apiVersion: argoproj.io/v1alpha1
+    kind: Application
+    metadata:
+      name: cargotrack-prod
+      namespace: argocd
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/CargoTrack-Org/cargotrack-helm.git
+        targetRevision: main
+        path: cargotrack
+        helm:
+          valueFiles:
+            - values.yaml
+            - values-prod.yaml
+          parameters:
+            - name: global.namespace
+              value: cargotrack-prod
+            - name: global.environment
+              value: prod
+            - name: coreService.serviceAccount.roleArn
+              value: ${module.irsa.core_service_role_arn}
+            - name: documentService.serviceAccount.roleArn
+              value: ${module.irsa.document_service_role_arn}
+            - name: aiService.serviceAccount.roleArn
+              value: ${module.irsa.ai_service_role_arn}
+            - name: aiService.env.MOCK_AGENT
+              value: "false"
+            - name: aiService.env.TEXTRACT_ENABLED
+              value: "true"
+            - name: aiService.env.LLM_PROVIDER
+              value: bedrock
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: cargotrack-prod
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 5s
+            maxDuration: 3m
+            factor: 2
+  YAML
 
-  field_manager {
-    force_conflicts = true
-  }
+  force_conflicts   = true
+  server_side_apply = true
 
   depends_on = [
     helm_release.argocd,
     kubernetes_namespace.cargotrack_prod,
     kubernetes_config_map.cargotrack_aws_config_prod,
     kubernetes_secret.cargotrack_secrets_prod,
-    kubernetes_manifest.external_secret_prod,
+    kubectl_manifest.external_secret_prod,
     module.irsa,
   ]
 }
@@ -1054,49 +936,38 @@ resource "kubernetes_manifest" "cargotrack_prod_app" {
 #      root-app destroyed → dev/prod-app destroyed → null_resource cleanup runs
 #      → ESO CRs → ESO Helm → ArgoCD Helm → namespaces → EKS ✅
 
-resource "kubernetes_manifest" "argocd_root_app" {
-  manifest = {
-    apiVersion = "argoproj.io/v1alpha1"
-    kind       = "Application"
-    metadata = {
-      name      = "root-app"
-      namespace = "argocd"
-      # finalizers intentionally omitted:
-      #   Setting finalizers = [] causes a provider inconsistency error because
-      #   the K8s API returns null for empty finalizers, not [].
-    }
-    spec = {
-      project = "default"
-      source = {
-        repoURL        = "https://github.com/CargoTrack-Org/cargotrack-gitops.git"
-        targetRevision = "main"
-        path           = "apps"
-      }
-      destination = {
-        server    = "https://kubernetes.default.svc"
-        namespace = "argocd"
-      }
-      syncPolicy = {
-        automated = {
-          prune    = true
-          selfHeal = true
-        }
-        syncOptions = [
-          "CreateNamespace=true",
-        ]
-      }
-    }
-  }
+resource "kubectl_manifest" "argocd_root_app" {
+  yaml_body = <<-YAML
+    apiVersion: argoproj.io/v1alpha1
+    kind: Application
+    metadata:
+      name: root-app
+      namespace: argocd
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/CargoTrack-Org/cargotrack-gitops.git
+        targetRevision: main
+        path: apps
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+  YAML
 
-  field_manager {
-    force_conflicts = true
-  }
+  force_conflicts   = true
+  server_side_apply = true
 
   depends_on = [
     helm_release.argocd,
     kubernetes_namespace.argocd,
-    kubernetes_manifest.cargotrack_dev_app,
-    kubernetes_manifest.cargotrack_prod_app,
+    kubectl_manifest.cargotrack_dev_app,
+    kubectl_manifest.cargotrack_prod_app,
     # Destroy ordering: argocd_root_app depends on null_resource so on destroy:
     # root-app is destroyed FIRST, THEN null_resource ingress cleanup runs,
     # THEN ArgoCD Helm can be uninstalled cleanly (no orphaned ALBs).

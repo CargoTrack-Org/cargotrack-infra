@@ -66,3 +66,29 @@ provider "kubernetes" {
     args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
   }
 }
+
+# ── kubectl provider (gavinbunney/kubectl) ────────────────────────────────────
+# Used for ALL kubernetes_manifest resources (ClusterSecretStore, ExternalSecret,
+# ArgoCD Application CRs).
+#
+# KEY DIFFERENCE from hashicorp/kubernetes_manifest:
+#   kubernetes_manifest fetches CRD schemas from the API server AT PLAN TIME.
+#   On a fresh deploy (cluster does not exist yet), this fails with:
+#     "cannot create REST client: no client config"
+#
+#   kubectl_manifest defers all API communication to APPLY TIME, enabling the
+#   one-apply pattern. During plan, it validates YAML structure locally only.
+#
+# load_config_file = false — prevents reading ~/.kube/config during plan,
+#   which would fail in CI/CD or on a fresh machine.
+
+provider "kubectl" {
+  host                   = try(module.eks.cluster_endpoint, "")
+  cluster_ca_certificate = try(base64decode(module.eks.cluster_ca_data), "")
+  load_config_file       = false
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
+  }
+}
