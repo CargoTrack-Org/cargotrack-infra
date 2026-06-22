@@ -163,15 +163,17 @@ output "eso_controller_version" {
   value       = helm_release.external_secrets.version
 }
 
-output "guardduty_detector_id" {
-  description = "AWS GuardDuty detector ID"
-  value       = module.guardduty.detector_id
-}
-
-output "guardduty_findings_rule_arn" {
-  description = "EventBridge rule ARN for high-severity GuardDuty findings"
-  value       = module.guardduty.findings_event_rule_arn
-}
+# GuardDuty outputs — disabled until training account permission is granted
+# Uncomment together with module.guardduty in main.tf
+# output "guardduty_detector_id" {
+#   description = "AWS GuardDuty detector ID"
+#   value       = module.guardduty.detector_id
+# }
+#
+# output "guardduty_findings_rule_arn" {
+#   description = "EventBridge rule ARN for high-severity GuardDuty findings"
+#   value       = module.guardduty.findings_event_rule_arn
+# }
 
 output "irsa_eso_role_arn" {
   description = "IRSA role ARN for External Secrets Operator — annotated on the ESO Helm chart ServiceAccount"

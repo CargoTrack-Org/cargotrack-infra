@@ -327,19 +327,19 @@ module "ecr" {
   eks_node_role_arn = module.eks.node_role_arn
 }
 
-# ── GUARDDUTY ─────────────────────────────────────────────────────────────────
+# ── GUARDDUTY — TEMPORARILY DISABLED ─────────────────────────────────────────
+# GuardDuty requires explicit permission in the training account.
+# Re-enable by uncommenting the block below once permission is granted.
 # Threat detection: CloudTrail analysis, VPC Flow Logs, EKS audit logs,
 # S3 data protection, malware scanning on EKS workloads.
 # HIGH/CRITICAL findings (severity >= 7) route to SNS → email if alarm_email is set.
 
-module "guardduty" {
-
-  source = "../../modules/guardduty"
-
-  project_name = var.project_name
-  alarm_email  = var.alarm_email
-  kms_key_arn  = module.database.kms_key_arn
-}
+# module "guardduty" {
+#   source       = "../../modules/guardduty"
+#   project_name = var.project_name
+#   alarm_email  = var.alarm_email
+#   kms_key_arn  = module.database.kms_key_arn
+# }
 
 # ── SSM PARAMETER STORE — Operational Configuration ──────────────────────────
 #
