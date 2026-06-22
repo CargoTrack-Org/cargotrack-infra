@@ -67,7 +67,8 @@ variable "eks_ingress_alb_dns" {
       kubectl get ingress -n cargotrack-dev -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
   EOT
   type    = string
-  default = ""  # Leave empty — ALB is created dynamically by the LBC on each apply
+  # Dev ALB created by AWS LBC for cargotrack-dev ingress (kubectl get ingress -n cargotrack-dev)
+  default = "k8s-cargotrack-faafefcd8d-1983483383.us-east-1.elb.amazonaws.com"
 }
 
 # ─── GitHub OIDC ──────────────────────────────────────────────────────────────
