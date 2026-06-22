@@ -30,37 +30,39 @@ provider "aws" {
   }
 }
 
-# ── EKS authentication data sources ──────────────────────────────────────────
-# These are fetched at plan time once the EKS cluster exists.
-# On the very first apply (cluster not yet created), Terraform resolves these
-# lazily — the helm_release resources depend on module.eks, so they are applied
-# only after the cluster is ready.
-
-data "aws_eks_cluster" "main" {
-  name = module.eks.cluster_name
-}
-
-data "aws_eks_cluster_auth" "main" {
-  name = module.eks.cluster_name
-}
-
-# ── Helm provider ─────────────────────────────────────────────────────────────
-# Wired directly to the EKS cluster using short-lived cluster credentials.
-# No kubeconfig file is used — credentials are fetched via the AWS provider.
+# ── EKS Helm + Kubernetes providers ───────────────────────────────────────────
+#
+# WHY exec instead of data sources:
+#   data.aws_eks_cluster is evaluated at PLAN time, which fails on a fresh deploy
+#   because the EKS cluster doesn't exist yet ("couldn't find resource").
+#   Using `exec` with `aws eks get-token` defers token acquisition to APPLY time
+#   (after the cluster is created by module.eks).
+#
+#   During plan:  module.eks.cluster_endpoint = (known after apply) → try() → ""
+#                 No Kubernetes API calls are made during plan.
+#   During apply: After module.eks creates the cluster, all K8s/Helm resources
+#                 (which depend_on module.eks) use real credentials from exec.
+#
+# This is the correct one-apply pattern for EKS + Helm + Kubernetes in Terraform.
 
 provider "helm" {
   kubernetes {
-    host                   = data.aws_eks_cluster.main.endpoint
-    cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
-    token                  = data.aws_eks_cluster_auth.main.token
+    host                   = try(module.eks.cluster_endpoint, "")
+    cluster_ca_certificate = try(base64decode(module.eks.cluster_ca_data), "")
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
+    }
   }
 }
 
-# ── Kubernetes provider ───────────────────────────────────────────────────────
-# Used to create namespaces (argocd, cargotrack) before Helm releases.
-
 provider "kubernetes" {
-  host                   = data.aws_eks_cluster.main.endpoint
-  cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
-  token                  = data.aws_eks_cluster_auth.main.token
+  host                   = try(module.eks.cluster_endpoint, "")
+  cluster_ca_certificate = try(base64decode(module.eks.cluster_ca_data), "")
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
+  }
 }

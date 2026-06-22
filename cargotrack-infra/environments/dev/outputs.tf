@@ -86,22 +86,23 @@ output "application_secret_arn" {
   value       = module.database.application_secret_arn
 }
 
-# ── CDN outputs ───────────────────────────────────────────────────────────────
-
-output "cloudfront_domain_name" {
-  description = "CloudFront distribution domain — access the application at https://<value>"
-  value       = module.cdn.cloudfront_domain_name
-}
-
-output "cloudfront_distribution_id" {
-  description = "CloudFront distribution ID — use for cache invalidations"
-  value       = module.cdn.cloudfront_distribution_id
-}
-
-output "waf_web_acl_arn" {
-  description = "WAF Web ACL ARN attached to CloudFront"
-  value       = module.cdn.waf_web_acl_arn
-}
+# CDN outputs — disabled while module.cdn is commented out
+# Re-enable together with module.cdn in main.tf when domain_name is configured.
+#
+# output "cloudfront_domain_name" {
+#   description = "CloudFront distribution domain — access the application at https://<value>"
+#   value       = module.cdn.cloudfront_domain_name
+# }
+#
+# output "cloudfront_distribution_id" {
+#   description = "CloudFront distribution ID — use for cache invalidations"
+#   value       = module.cdn.cloudfront_distribution_id
+# }
+#
+# output "waf_web_acl_arn" {
+#   description = "WAF Web ACL ARN attached to CloudFront"
+#   value       = module.cdn.waf_web_acl_arn
+# }
 
 # ── ECR outputs ───────────────────────────────────────────────────────────────
 

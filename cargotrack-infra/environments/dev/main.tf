@@ -133,38 +133,36 @@ module "endpoints" {
   ]
 }
 
-# ── CDN ───────────────────────────────────────────────────────────────────────
+# ── CDN — DISABLED FOR DEV EVALUATION ───────────────────────────────────────────
 # CloudFront + WAF v2.
+# Disabled because:
+#   1. domain_name = "" in tfvars (no custom domain configured)
+#   2. CloudFront requires a non-empty origin domain_name — the ALB DNS is only
+#      known AFTER terraform apply (cannot be provided at plan time on fresh deploy)
+#   3. CloudFront + WAF adds significant cost for a dev/evaluation session
+# Access the application directly via the ALB DNS from:
+#   kubectl get ingress -n cargotrack-dev
+# Re-enable when domain_name is set and a stable ALB DNS is available.
 #
-# Dependency order:
-#   1. module.dns  → creates ACM cert (us-east-1) + validates it via Route53
-#   2. module.cdn  → creates CloudFront, using the validated ACM cert ARN
-#   3. aws_route53_record (below) → A-records pointing to the CF domain
+# module "cdn" {
 #
-# Why A-records are at env level (not inside module.dns):
-#   If A-records were inside dns, dns would depend on cdn (for cf domain name)
-#   AND cdn would depend on dns (for cert ARN) → circular dependency.
-#   Moving A-records to env level gives both outputs without a cycle.
-
-module "cdn" {
-
-  source = "../../modules/cdn"
-
-  project_name = var.project_name
-
-  # ALB DNS is baked into the variable default — no manual -var needed.
-  alb_dns_name = var.eks_ingress_alb_dns
-
-  # Pass the validated ACM cert from the dns module.
-  # When domain_name = "", dns.certificate_arn = "" and CF uses its default cert.
-  acm_certificate_arn = module.dns.certificate_arn
-
-  # CloudFront aliases must exactly match the ACM cert's domain names.
-  domain_aliases = var.domain_name != "" ? [var.domain_name, "www.${var.domain_name}"] : []
-
-  # dns module must complete (cert validated) before CF is created with the cert.
-  depends_on = [module.dns]
-}
+#   source = "../../modules/cdn"
+#
+#   project_name = var.project_name
+#
+#   # ALB DNS is baked into the variable default — no manual -var needed.
+#   alb_dns_name = var.eks_ingress_alb_dns
+#
+#   # Pass the validated ACM cert from the dns module.
+#   # When domain_name = "", dns.certificate_arn = "" and CF uses its default cert.
+#   acm_certificate_arn = module.dns.certificate_arn
+#
+#   # CloudFront aliases must exactly match the ACM cert's domain names.
+#   domain_aliases = var.domain_name != "" ? [var.domain_name, "www.${var.domain_name}"] : []
+#
+#   # dns module must complete (cert validated) before CF is created with the cert.
+#   depends_on = [module.dns]
+# }
 
 # ── DNS (Route53 + ACM) ───────────────────────────────────────────────────────
 # Conditional on domain_name being set. All resources inside use count = 0
@@ -185,35 +183,29 @@ module "dns" {
   }
 }
 
-# ── Route 53 A-records → CloudFront ──────────────────────────────────────────
-# These live at environment level (not inside module.dns) to break the
-# circular dependency: module.cdn needs dns.certificate_arn, and the A-records
-# need cdn.cloudfront_domain_name. Placing both in the same module would create
-# a cycle. At env level, all outputs are available without any cycle.
-
-resource "aws_route53_record" "cloudfront_apex" {
-  count = var.domain_name != "" ? 1 : 0
-
-  zone_id = module.dns.zone_id
-  name    = var.domain_name
-  type    = "A"
-
-  alias {
-    name                   = module.cdn.cloudfront_domain_name
-    zone_id                = "Z2FDTNDATAQYW2" # CloudFront global zone ID (constant)
-    evaluate_target_health = false
-  }
-}
-
-resource "aws_route53_record" "cloudfront_www" {
-  count = var.domain_name != "" ? 1 : 0
-
-  zone_id = module.dns.zone_id
-  name    = "www.${var.domain_name}"
-  type    = "CNAME"
-  ttl     = 300
-  records = [module.cdn.cloudfront_domain_name]
-}
+# Route 53 A-records — disabled while module.cdn is commented out
+# Re-enable together with module.cdn when domain_name is configured.
+#
+# resource "aws_route53_record" "cloudfront_apex" {
+#   count   = var.domain_name != "" ? 1 : 0
+#   zone_id = module.dns.zone_id
+#   name    = var.domain_name
+#   type    = "A"
+#   alias {
+#     name                   = module.cdn.cloudfront_domain_name
+#     zone_id                = "Z2FDTNDATAQYW2"
+#     evaluate_target_health = false
+#   }
+# }
+#
+# resource "aws_route53_record" "cloudfront_www" {
+#   count   = var.domain_name != "" ? 1 : 0
+#   zone_id = module.dns.zone_id
+#   name    = "www.${var.domain_name}"
+#   type    = "CNAME"
+#   ttl     = 300
+#   records = [module.cdn.cloudfront_domain_name]
+# }
 
 # EKS control plane + managed node group + OIDC provider for IRSA
 # Replaces the EC2/ASG-based compute module
