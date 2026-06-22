@@ -198,19 +198,46 @@ jobs:
 
           if [ "$CURRENT_MODE" = "CONFIG_MAP" ]; then
             echo "==> Upgrading cluster to API_AND_CONFIG_MAP auth mode..."
-            aws eks update-cluster-config \
+            # Capture the update ID so we can wait on the specific update,
+            # not on cluster.status (which is always ACTIVE).
+            UPDATE_ID=$(aws eks update-cluster-config \
               --name "$CLUSTER" \
               --access-config authenticationMode=API_AND_CONFIG_MAP \
-              --region "$REGION"
-            echo "    Waiting for cluster update to complete (max 5 min)..."
+              --region "$REGION" \
+              --query 'update.id' \
+              --output text)
+            echo "    Update ID: $UPDATE_ID"
+            echo "    Waiting for auth mode to become API_AND_CONFIG_MAP (max 5 min)..."
             for i in $(seq 1 30); do
-              STATUS=$(aws eks describe-cluster \
+              # Poll the actual auth mode — only becomes API_AND_CONFIG_MAP
+              # once the update is fully applied. cluster.status is ALWAYS
+              # ACTIVE and must NOT be used here (causes premature break).
+              AUTH_MODE=$(aws eks describe-cluster \
                 --name "$CLUSTER" --region "$REGION" \
-                --query cluster.status --output text)
-              echo "    Attempt $i/30 — cluster status: $STATUS"
-              [ "$STATUS" = "ACTIVE" ] && break
+                --query 'cluster.accessConfig.authenticationMode' \
+                --output text)
+              UPDATE_STATUS=$(aws eks describe-update \
+                --name "$CLUSTER" \
+                --update-id "$UPDATE_ID" \
+                --region "$REGION" \
+                --query 'update.status' \
+                --output text 2>/dev/null || echo "Unknown")
+              echo "    Attempt $i/30 — auth mode: $AUTH_MODE | update: $UPDATE_STATUS"
+              [ "$AUTH_MODE" = "API_AND_CONFIG_MAP" ] && echo "    Auth mode confirmed." && break
+              if [ "$UPDATE_STATUS" = "Failed" ] || [ "$UPDATE_STATUS" = "Cancelled" ]; then
+                echo "ERROR: EKS auth mode update $UPDATE_STATUS — cannot proceed"
+                exit 1
+              fi
               sleep 10
             done
+            # Final check: fail fast rather than continue with wrong auth mode
+            FINAL_MODE=$(aws eks describe-cluster \
+              --name "$CLUSTER" --region "$REGION" \
+              --query 'cluster.accessConfig.authenticationMode' --output text)
+            if [ "$FINAL_MODE" != "API_AND_CONFIG_MAP" ]; then
+              echo "ERROR: Auth mode is still $FINAL_MODE after waiting. Aborting."
+              exit 1
+            fi
           else
             echo "    Cluster is already in $CURRENT_MODE mode — no upgrade needed."
           fi
