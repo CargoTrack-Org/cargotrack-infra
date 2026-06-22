@@ -133,36 +133,31 @@ module "endpoints" {
   ]
 }
 
-# ── CDN — DISABLED FOR DEV EVALUATION ───────────────────────────────────────────
-# CloudFront + WAF v2.
-# Disabled because:
-#   1. domain_name = "" in tfvars (no custom domain configured)
-#   2. CloudFront requires a non-empty origin domain_name — the ALB DNS is only
-#      known AFTER terraform apply (cannot be provided at plan time on fresh deploy)
-#   3. CloudFront + WAF adds significant cost for a dev/evaluation session
-# Access the application directly via the ALB DNS from:
-#   kubectl get ingress -n cargotrack-dev
-# Re-enable when domain_name is set and a stable ALB DNS is available.
-#
-# module "cdn" {
-#
-#   source = "../../modules/cdn"
-#
-#   project_name = var.project_name
-#
-#   # ALB DNS is baked into the variable default — no manual -var needed.
-#   alb_dns_name = var.eks_ingress_alb_dns
-#
-#   # Pass the validated ACM cert from the dns module.
-#   # When domain_name = "", dns.certificate_arn = "" and CF uses its default cert.
-#   acm_certificate_arn = module.dns.certificate_arn
-#
-#   # CloudFront aliases must exactly match the ACM cert's domain names.
-#   domain_aliases = var.domain_name != "" ? [var.domain_name, "www.${var.domain_name}"] : []
-#
-#   # dns module must complete (cert validated) before CF is created with the cert.
-#   depends_on = [module.dns]
-# }
+# ── CDN (CloudFront + WAF v2) ─────────────────────────────────────────────────
+# Re-enabled: ALB DNS is known (terraform.tfvars: eks_ingress_alb_dns).
+# Architecture: User → CloudFront (HTTPS + WAF) → ALB HTTP:80 → EKS pods
+# WAF rules: IP Reputation, OWASP Core, Known Bad Inputs, SQLi protection.
+
+module "cdn" {
+
+  source = "../../modules/cdn"
+
+  project_name = var.project_name
+
+  # ALB DNS from terraform.tfvars (retrieved via kubectl get ingress).
+  alb_dns_name = var.eks_ingress_alb_dns
+
+  # Pass the validated ACM cert from the dns module.
+  # When domain_name = "", dns.certificate_arn = "" and CF uses its default cert.
+  acm_certificate_arn = module.dns.certificate_arn
+
+  # CloudFront aliases must exactly match the ACM cert's domain names.
+  domain_aliases = var.domain_name != "" ? [var.domain_name, "www.${var.domain_name}"] : []
+
+  # dns module must complete (cert validated) before CF is created with the cert.
+  depends_on = [module.dns]
+}
+
 
 # ── DNS (Route53 + ACM) ───────────────────────────────────────────────────────
 # Conditional on domain_name being set. All resources inside use count = 0
@@ -183,29 +178,30 @@ module "dns" {
   }
 }
 
-# Route 53 A-records — disabled while module.cdn is commented out
-# Re-enable together with module.cdn when domain_name is configured.
-#
-# resource "aws_route53_record" "cloudfront_apex" {
-#   count   = var.domain_name != "" ? 1 : 0
-#   zone_id = module.dns.zone_id
-#   name    = var.domain_name
-#   type    = "A"
-#   alias {
-#     name                   = module.cdn.cloudfront_domain_name
-#     zone_id                = "Z2FDTNDATAQYW2"
-#     evaluate_target_health = false
-#   }
-# }
-#
-# resource "aws_route53_record" "cloudfront_www" {
-#   count   = var.domain_name != "" ? 1 : 0
-#   zone_id = module.dns.zone_id
-#   name    = "www.${var.domain_name}"
-#   type    = "CNAME"
-#   ttl     = 300
-#   records = [module.cdn.cloudfront_domain_name]
-# }
+# Route 53 A-records — created once module.cdn is available
+# apex (shopp-novaa.co.in) and www alias to CloudFront distribution
+# count = 0 when domain_name = "" (safe no-op)
+
+resource "aws_route53_record" "cloudfront_apex" {
+  count   = var.domain_name != "" ? 1 : 0
+  zone_id = module.dns.zone_id
+  name    = var.domain_name
+  type    = "A"
+  alias {
+    name                   = module.cdn.cloudfront_domain_name
+    zone_id                = "Z2FDTNDATAQYW2"
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "cloudfront_www" {
+  count   = var.domain_name != "" ? 1 : 0
+  zone_id = module.dns.zone_id
+  name    = "www.${var.domain_name}"
+  type    = "CNAME"
+  ttl     = 300
+  records = [module.cdn.cloudfront_domain_name]
+}
 
 # EKS control plane + managed node group + OIDC provider for IRSA
 # Replaces the EC2/ASG-based compute module
