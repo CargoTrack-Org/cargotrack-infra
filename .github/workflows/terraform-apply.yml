@@ -165,6 +165,77 @@ jobs:
           role-to-assume: ${{ secrets.AWS_INFRA_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # ── Grant Terraform CI role EKS cluster-admin access ─────────────────────
+      # WHY THIS STEP EXISTS:
+      #   The Terraform Kubernetes/Helm/kubectl providers call the EKS Kubernetes
+      #   API (k8s.tf resources). The EKS cluster must recognise the CI IAM role
+      #   as a cluster admin, otherwise all k8s resource operations fail with:
+      #     Error: Unauthorized
+      #
+      # WHY NOT IN Terraform state:
+      #   Granting EKS access IN Terraform creates a chicken-and-egg: Terraform
+      #   needs EKS access to apply, but EKS access is created by the apply.
+      #   Putting it in a workflow pre-step breaks the cycle.
+      #
+      # IDEMPOTENCY:
+      #   All AWS CLI calls here are idempotent. Errors caused by
+      #   "already exists" are suppressed with 2>/dev/null || true.
+      #   The cluster mode upgrade only runs when currently in CONFIG_MAP mode.
+      - name: Grant CI role EKS cluster-admin access (idempotent)
+        run: |
+          set -euo pipefail
+          CLUSTER=cargotrack
+          REGION=us-east-1
+          ROLE_ARN=arn:aws:iam::692828329130:role/cargotrack-terraform-role
+          POLICY_ARN=arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+
+          echo "==> Step 1: Check cluster authentication mode"
+          CURRENT_MODE=$(aws eks describe-cluster \
+            --name "$CLUSTER" --region "$REGION" \
+            --query 'cluster.accessConfig.authenticationMode' \
+            --output text 2>/dev/null || echo "CONFIG_MAP")
+          echo "    Current mode: $CURRENT_MODE"
+
+          if [ "$CURRENT_MODE" = "CONFIG_MAP" ]; then
+            echo "==> Upgrading cluster to API_AND_CONFIG_MAP auth mode..."
+            aws eks update-cluster-config \
+              --name "$CLUSTER" \
+              --access-config authenticationMode=API_AND_CONFIG_MAP \
+              --region "$REGION"
+            echo "    Waiting for cluster update to complete (max 5 min)..."
+            for i in $(seq 1 30); do
+              STATUS=$(aws eks describe-cluster \
+                --name "$CLUSTER" --region "$REGION" \
+                --query cluster.status --output text)
+              echo "    Attempt $i/30 — cluster status: $STATUS"
+              [ "$STATUS" = "ACTIVE" ] && break
+              sleep 10
+            done
+          else
+            echo "    Cluster is already in $CURRENT_MODE mode — no upgrade needed."
+          fi
+
+          echo "==> Step 2: Create EKS access entry for Terraform CI role"
+          aws eks create-access-entry \
+            --cluster-name "$CLUSTER" \
+            --principal-arn "$ROLE_ARN" \
+            --type STANDARD \
+            --region "$REGION" 2>/dev/null \
+            && echo "    Access entry created." \
+            || echo "    Access entry already exists — skipping."
+
+          echo "==> Step 3: Associate AmazonEKSClusterAdminPolicy"
+          aws eks associate-access-policy \
+            --cluster-name "$CLUSTER" \
+            --principal-arn "$ROLE_ARN" \
+            --policy-arn "$POLICY_ARN" \
+            --access-scope type=cluster \
+            --region "$REGION" 2>/dev/null \
+            && echo "    Policy associated." \
+            || echo "    Policy already associated — skipping."
+
+          echo "==> EKS cluster-admin access setup complete."
+
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false

@@ -25,7 +25,9 @@ variable "vpc_cidr" {
 variable "alarm_email" {
   description = "Email address for CloudWatch alarm SNS notifications"
   type        = string
-  default     = null
+  # Set to project team email — SNS subscription is created and pending confirmation.
+  # Change to null to disable email alerts.
+  default     = "abhibee27@gmail.com"
 }
 
 # ─── EKS variables ────────────────────────────────────────────────────────────
@@ -45,7 +47,8 @@ variable "node_instance_types" {
 variable "node_min_size" {
   description = "Minimum number of EKS worker nodes"
   type        = number
-  default     = 1
+  # 2 nodes minimum for high-availability (dev and prod namespaces share cluster)
+  default     = 2
 }
 
 variable "node_max_size" {
