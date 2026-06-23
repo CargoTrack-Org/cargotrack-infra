@@ -70,37 +70,42 @@ resource "aws_secretsmanager_secret_version" "application" {
 
 resource "aws_ssm_parameter" "db_name" {
 
-  name  = "/${var.project_name}/database/name"
-  type  = "String"
-  value = "cargotrack"
+  name      = "/${var.project_name}/database/name"
+  type      = "String"
+  value     = "cargotrack"
+  overwrite = true
 }
 
 resource "aws_ssm_parameter" "db_host" {
 
-  name  = "/${var.project_name}/database/host"
-  type  = "String"
-  value = aws_db_instance.database.address
+  name      = "/${var.project_name}/database/host"
+  type      = "String"
+  value     = aws_db_instance.database.address
+  overwrite = true
 }
 
 resource "aws_ssm_parameter" "db_user" {
 
-  name  = "/${var.project_name}/database/user"
-  type  = "String"
-  value = "cargotrack"
+  name      = "/${var.project_name}/database/user"
+  type      = "String"
+  value     = "cargotrack"
+  overwrite = true
 }
 
 resource "aws_ssm_parameter" "db_port" {
 
-  name  = "/${var.project_name}/database/port"
-  type  = "String"
-  value = "5432"
+  name      = "/${var.project_name}/database/port"
+  type      = "String"
+  value     = "5432"
+  overwrite = true
 }
 
 resource "aws_ssm_parameter" "node_env" {
 
-  name  = "/${var.project_name}/application/node-env"
-  type  = "String"
-  value = "production"
+  name      = "/${var.project_name}/application/node-env"
+  type      = "String"
+  value     = "production"
+  overwrite = true
 }
 
 resource "aws_db_subnet_group" "database" {

@@ -52,7 +52,9 @@ provider "helm" {
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
+      # var.project_name is statically known at plan time (unlike module.eks.cluster_name
+      # which is only known after apply). The cluster name = project_name by construction.
+      args        = ["eks", "get-token", "--cluster-name", var.project_name, "--region", var.aws_region]
     }
   }
 }
@@ -63,7 +65,7 @@ provider "kubernetes" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
+    args        = ["eks", "get-token", "--cluster-name", var.project_name, "--region", var.aws_region]
   }
 }
 
@@ -89,6 +91,6 @@ provider "kubectl" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
+    args        = ["eks", "get-token", "--cluster-name", var.project_name, "--region", var.aws_region]
   }
 }

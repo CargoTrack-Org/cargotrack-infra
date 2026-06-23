@@ -105,11 +105,15 @@ module "monitoring" {
   alarm_email   = var.alarm_email
   kms_key_arn   = module.database.kms_key_arn
 
-  # EKS Container Insights alarms — enabled now that EKS is the compute platform
-  eks_cluster_name = module.eks.cluster_name
+  # EKS Container Insights alarms
+  # Use var.project_name directly — statically known at plan time.
+  # (module.eks.cluster_name is computed, making for_each keys unknown before apply.)
+  eks_cluster_name = var.project_name
 
-  # SQS compliance queue depth alarm — reuses existing queue name from eventing module
-  compliance_queue_name = module.eventing.compliance_queue_name
+  # SQS compliance queue depth alarm
+  # Queue name = "${project_name}-compliance-trigger" by construction in eventing module.
+  # Using static interpolation avoids an unknown for_each key during plan.
+  compliance_queue_name = "${var.project_name}-compliance-trigger"
 }
 
 # ── VPC ENDPOINTS ────────────────────────────────────────────────────────────
