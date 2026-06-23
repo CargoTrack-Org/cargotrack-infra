@@ -772,169 +772,26 @@ resource "null_resource" "pre_destroy_ingress_cleanup" {
   ]
 }
 
-# ── ArgoCD Application: cargotrack-dev ────────────────────────────────────────
-# Deploys the CargoTrack Helm chart to the cargotrack-dev namespace.
-#
-# IRSA role ARNs are injected as Helm parameters — these are Terraform outputs
-# that cannot be committed to values-dev.yaml without a post-apply edit cycle.
-# The parameters override the empty roleArn fields in values files at sync time.
-#
-# global.namespace = "cargotrack-dev" is injected as a Helm parameter so the
-# Helm chart templates render all resources in the correct namespace without
-# requiring changes to the values files in the cargotrack-helm repo.
-
-resource "kubectl_manifest" "cargotrack_dev_app" {
-  yaml_body = <<-YAML
-    apiVersion: argoproj.io/v1alpha1
-    kind: Application
-    metadata:
-      name: cargotrack-dev
-      namespace: argocd
-    spec:
-      project: default
-      source:
-        repoURL: https://github.com/CargoTrack-Org/cargotrack-helm.git
-        targetRevision: main
-        path: cargotrack
-        helm:
-          valueFiles:
-            - values.yaml
-            - values-dev.yaml
-          parameters:
-            - name: global.namespace
-              value: cargotrack-dev
-            - name: global.environment
-              value: dev
-            - name: coreService.serviceAccount.roleArn
-              value: ${module.irsa.core_service_role_arn}
-            - name: documentService.serviceAccount.roleArn
-              value: ${module.irsa.document_service_role_arn}
-            - name: aiService.serviceAccount.roleArn
-              value: ${module.irsa.ai_service_role_arn}
-            - name: aiService.env.MOCK_AGENT
-              value: "false"
-            - name: aiService.env.TEXTRACT_ENABLED
-              value: "true"
-            - name: aiService.env.LLM_PROVIDER
-              value: bedrock
-      destination:
-        server: https://kubernetes.default.svc
-        namespace: cargotrack-dev
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=false
-          - ServerSideApply=true
-        retry:
-          limit: 3
-          backoff:
-            duration: 5s
-            maxDuration: 3m
-            factor: 2
-  YAML
-
-  force_conflicts   = true
-  server_side_apply = true
-
-  depends_on = [
-    helm_release.argocd,
-    kubernetes_namespace.cargotrack_dev,
-    kubernetes_config_map.cargotrack_aws_config_dev,
-    kubernetes_secret.cargotrack_secrets_dev,
-    kubectl_manifest.external_secret_dev,
-    module.irsa,
-  ]
-}
-
-# ── ArgoCD Application: cargotrack-prod ───────────────────────────────────────
-# Deploys the CargoTrack Helm chart to the cargotrack-prod namespace.
-# Uses values-prod.yaml overrides (higher replica counts, prod-grade settings).
-# Bedrock and Textract are enabled for prod — real AI compliance checks.
-
-resource "kubectl_manifest" "cargotrack_prod_app" {
-  yaml_body = <<-YAML
-    apiVersion: argoproj.io/v1alpha1
-    kind: Application
-    metadata:
-      name: cargotrack-prod
-      namespace: argocd
-    spec:
-      project: default
-      source:
-        repoURL: https://github.com/CargoTrack-Org/cargotrack-helm.git
-        targetRevision: main
-        path: cargotrack
-        helm:
-          valueFiles:
-            - values.yaml
-            - values-prod.yaml
-          parameters:
-            - name: global.namespace
-              value: cargotrack-prod
-            - name: global.environment
-              value: prod
-            - name: coreService.serviceAccount.roleArn
-              value: ${module.irsa.core_service_role_arn}
-            - name: documentService.serviceAccount.roleArn
-              value: ${module.irsa.document_service_role_arn}
-            - name: aiService.serviceAccount.roleArn
-              value: ${module.irsa.ai_service_role_arn}
-            - name: aiService.env.MOCK_AGENT
-              value: "false"
-            - name: aiService.env.TEXTRACT_ENABLED
-              value: "true"
-            - name: aiService.env.LLM_PROVIDER
-              value: bedrock
-      destination:
-        server: https://kubernetes.default.svc
-        namespace: cargotrack-prod
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=false
-          - ServerSideApply=true
-        retry:
-          limit: 3
-          backoff:
-            duration: 5s
-            maxDuration: 3m
-            factor: 2
-  YAML
-
-  force_conflicts   = true
-  server_side_apply = true
-
-  depends_on = [
-    helm_release.argocd,
-    kubernetes_namespace.cargotrack_prod,
-    kubernetes_config_map.cargotrack_aws_config_prod,
-    kubernetes_secret.cargotrack_secrets_prod,
-    kubectl_manifest.external_secret_prod,
-    module.irsa,
-  ]
-}
-
 # ── ArgoCD App-of-Apps Bootstrap ─────────────────────────────────────────────
-# Creates the root Application CR (app-of-apps pattern) that watches
-# cargotrack-gitops/apps/ for Application manifests.
+# PURE APP-OF-APPS PATTERN:
+# Terraform creates ONLY the root Application CR.
+# ArgoCD discovers all 8 per-service child apps from cargotrack-gitops/apps/:
+#   frontend-dev, frontend-prod
+#   core-dev, core-prod
+#   document-dev, document-prod
+#   ai-dev, ai-prod
+#
+# IRSA ARNs are in values-dev.yaml / values-prod.yaml (per-chart) — no Terraform
+# parameter injection needed. The values files are committed to cargotrack-helm.
 #
 # DESIGN DECISIONS:
-#   1. kubernetes_manifest (not server.additionalApplications):
-#      Gives Terraform explicit lifecycle control.
-#   2. NO cascade-delete finalizer:
-#      Avoids kubernetes_manifest deletion timeout (no configurable timeout).
-#      ALB cleanup handled by null_resource.pre_destroy_ingress_cleanup.
-#   3. No CRD bootstrap issue:
-#      depends_on = [helm_release.argocd] ensures CRDs exist before this applies.
-#   4. Destroy sequence guarantee:
-#      argocd_root_app (no direct destruction dependency on null_resource, but
-#      cargotrack_dev/prod_app depend on null_resource ensuring correct ALB cleanup):
-#      root-app destroyed → dev/prod-app destroyed → null_resource cleanup runs
-#      → ESO CRs → ESO Helm → ArgoCD Helm → namespaces → EKS ✅
+#   1. Pure App-of-Apps eliminates the 2-monolith Terraform app resources.
+#      Each service is independently deployable and visible in ArgoCD UI.
+#   2. No cascade-delete finalizer — avoids Terraform destroy timeout.
+#      ALB cleanup handled by null_resource.pre_destroy_ingress_cleanup below.
+#   3. depends_on = [helm_release.argocd] ensures ArgoCD CRDs exist.
+#   4. Destroy sequence: root-app → child apps pruned by ArgoCD →
+#      null_resource ingress cleanup → ArgoCD Helm → namespaces → EKS ✅
 
 resource "kubectl_manifest" "argocd_root_app" {
   yaml_body = <<-YAML
@@ -943,6 +800,8 @@ resource "kubectl_manifest" "argocd_root_app" {
     metadata:
       name: root-app
       namespace: argocd
+      # No cascade-delete finalizer — prevents Terraform destroy timeout.
+      # Child apps are pruned by ArgoCD when this root-app is deleted (prune: true).
     spec:
       project: default
       source:
@@ -966,10 +825,16 @@ resource "kubectl_manifest" "argocd_root_app" {
   depends_on = [
     helm_release.argocd,
     kubernetes_namespace.argocd,
-    kubectl_manifest.cargotrack_dev_app,
-    kubectl_manifest.cargotrack_prod_app,
-    # Destroy ordering: argocd_root_app depends on null_resource so on destroy:
-    # root-app is destroyed FIRST, THEN null_resource ingress cleanup runs,
+    # Ensure both environment ConfigMaps and Secrets exist before ArgoCD syncs
+    # child app Deployments (init containers and pods reference these).
+    kubernetes_config_map.cargotrack_aws_config_dev,
+    kubernetes_config_map.cargotrack_aws_config_prod,
+    kubernetes_secret.cargotrack_secrets_dev,
+    kubernetes_secret.cargotrack_secrets_prod,
+    kubectl_manifest.external_secret_dev,
+    kubectl_manifest.external_secret_prod,
+    # Destroy ordering: root-app is destroyed FIRST (Terraform removes this
+    # kubectl_manifest), THEN null_resource ingress cleanup runs,
     # THEN ArgoCD Helm can be uninstalled cleanly (no orphaned ALBs).
     null_resource.pre_destroy_ingress_cleanup,
   ]
