@@ -163,8 +163,11 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
-  # Add-on runs with the node role (CloudWatchAgentServerPolicy is attached above)
-  service_account_role_arn = aws_iam_role.node.arn
+  # Do NOT set service_account_role_arn here.
+  # The node role trust policy is for ec2.amazonaws.com (not OIDC),
+  # so passing it as service_account_role_arn causes AssumeRoleWithWebIdentity
+  # to fail with AccessDenied. The agent uses the node instance profile instead,
+  # which already has CloudWatchAgentServerPolicy attached (line 137 above).
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-cloudwatch-observability"

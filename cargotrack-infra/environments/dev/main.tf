@@ -277,6 +277,42 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_cluster_sg" {
   }
 }
 
+# ── VPC Endpoint ingress from EKS cluster SG ──────────────────────────────────
+#
+# WHY THIS IS NEEDED (same design constraint as the RDS rule above):
+#
+#   The endpoints module creates a security group allowing inbound 443 from
+#   var.backend_sg_id (= module.security.eks_node_sg_id = the Terraform-managed
+#   cargotrack-eks_node-sg). However, worker node pods carry the auto-created
+#   eks-cluster-sg-cargotrack-* (cluster_sg_id), NOT cargotrack-eks_node-sg.
+#
+#   Consequence: ESO (external-secrets namespace), and any pod that accesses
+#   Secrets Manager, SSM, or KMS via VPC endpoints, gets a TCP timeout because
+#   the endpoint SG rejects their connections.
+#
+#   Error observed:
+#     "dial tcp 10.0.22.35:443: i/o timeout"   ← Secrets Manager VPC endpoint IP
+#     "dial tcp 10.0.21.46:443: i/o timeout"
+#
+#   This rule adds the cluster SG as an allowed source, fixing ESO sync and
+#   any other pod-to-AWS-service communication through interface endpoints.
+
+resource "aws_vpc_security_group_ingress_rule" "endpoints_from_cluster_sg" {
+
+  security_group_id            = module.endpoints.endpoints_security_group_id
+  referenced_security_group_id = module.eks.cluster_sg_id
+
+  from_port   = 443
+  to_port     = 443
+  ip_protocol = "tcp"
+
+  tags = {
+    Name      = "cargotrack-endpoints-from-eks-cluster-sg"
+    ManagedBy = "Terraform"
+    Purpose   = "Allow EKS worker node pods to reach VPC endpoints (Secrets Manager, SSM, KMS, S3) on port 443"
+  }
+}
+
 
 
 # ── IRSA (IAM Roles for Service Accounts) ─────────────────────────────────────
