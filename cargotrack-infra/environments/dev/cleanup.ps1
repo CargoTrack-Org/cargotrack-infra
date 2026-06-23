@@ -1,83 +1,53 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# CargoTrack — Pre-Apply Cleanup Script
-#
-# PURPOSE: Deletes orphaned AWS resources left behind from a previous
-#          terraform destroy that didn't fully clean up.
-#          Run this ONCE before terraform apply on a fresh state.
-#
-# SAFE TO RE-RUN: All deletions are idempotent (errors suppressed with 2>$null)
-# ─────────────────────────────────────────────────────────────────────────────
-
 $region  = "us-east-1"
 $account = "692828329130"
 $project = "cargotrack"
 
-Write-Host "`n=== CargoTrack Pre-Apply Cleanup ===" -ForegroundColor Cyan
-Write-Host "Region:  $region" -ForegroundColor Gray
-Write-Host "Account: $account" -ForegroundColor Gray
+Write-Host "=== CargoTrack Pre-Apply Cleanup ===" -ForegroundColor Cyan
 
-# ── 1. Secrets Manager ────────────────────────────────────────────────────────
-Write-Host "`n[1/8] Cleaning Secrets Manager..." -ForegroundColor Yellow
-aws secretsmanager delete-secret `
-    --secret-id "$project-database-secret-v2" `
-    --force-delete-without-recovery `
-    --region $region 2>$null | Out-Null
-Write-Host "  ✓ cargotrack-database-secret-v2" -ForegroundColor Green
+# 1. Secrets Manager
+Write-Host "[1/8] Secrets Manager..." -ForegroundColor Yellow
+aws secretsmanager delete-secret --secret-id "cargotrack-database-secret-v2" --force-delete-without-recovery --region $region 2>$null
+aws secretsmanager delete-secret --secret-id "cargotrack-application-secret-v2" --force-delete-without-recovery --region $region 2>$null
+Write-Host "  done" -ForegroundColor Green
 
-aws secretsmanager delete-secret `
-    --secret-id "$project-application-secret-v2" `
-    --force-delete-without-recovery `
-    --region $region 2>$null | Out-Null
-Write-Host "  ✓ cargotrack-application-secret-v2" -ForegroundColor Green
+# 2. SQS Queues
+Write-Host "[2/8] SQS Queues..." -ForegroundColor Yellow
+aws sqs delete-queue --queue-url "https://sqs.$region.amazonaws.com/$account/cargotrack-compliance-trigger-dlq" --region $region 2>$null
+aws sqs delete-queue --queue-url "https://sqs.$region.amazonaws.com/$account/cargotrack-compliance-trigger" --region $region 2>$null
+Write-Host "  done" -ForegroundColor Green
 
-# ── 2. SQS Queues ─────────────────────────────────────────────────────────────
-Write-Host "`n[2/8] Cleaning SQS queues..." -ForegroundColor Yellow
-$dlqUrl  = "https://sqs.$region.amazonaws.com/$account/$project-compliance-trigger-dlq"
-$mainUrl = "https://sqs.$region.amazonaws.com/$account/$project-compliance-trigger"
-aws sqs delete-queue --queue-url $dlqUrl  --region $region 2>$null | Out-Null
-aws sqs delete-queue --queue-url $mainUrl --region $region 2>$null | Out-Null
-Write-Host "  ✓ cargotrack-compliance-trigger-dlq" -ForegroundColor Green
-Write-Host "  ✓ cargotrack-compliance-trigger" -ForegroundColor Green
+# 3. KMS Alias
+Write-Host "[3/8] KMS Alias..." -ForegroundColor Yellow
+aws kms delete-alias --alias-name "alias/cargotrack-cmk" --region $region 2>$null
+Write-Host "  done" -ForegroundColor Green
 
-# ── 3. KMS Alias ──────────────────────────────────────────────────────────────
-Write-Host "`n[3/8] Cleaning KMS alias..." -ForegroundColor Yellow
-aws kms delete-alias --alias-name "alias/$project-cmk" --region $region 2>$null | Out-Null
-Write-Host "  ✓ alias/cargotrack-cmk" -ForegroundColor Green
-
-# ── 4. DynamoDB Table ─────────────────────────────────────────────────────────
-Write-Host "`n[4/8] Cleaning DynamoDB table..." -ForegroundColor Yellow
-aws dynamodb delete-table --table-name "$project-audit" --region $region 2>$null | Out-Null
-Write-Host "  ✓ cargotrack-audit (waiting for deletion...)" -ForegroundColor Green
-# Wait for table to actually delete before continuing
+# 4. DynamoDB
+Write-Host "[4/8] DynamoDB table..." -ForegroundColor Yellow
+aws dynamodb delete-table --table-name "cargotrack-audit" --region $region 2>$null
 Start-Sleep -Seconds 10
+Write-Host "  done" -ForegroundColor Green
 
-# ── 5. EventBridge Event Bus ──────────────────────────────────────────────────
-Write-Host "`n[5/8] Cleaning EventBridge bus..." -ForegroundColor Yellow
-aws events delete-event-bus --name "$project-events" --region $region 2>$null | Out-Null
-Write-Host "  ✓ cargotrack-events" -ForegroundColor Green
+# 5. EventBridge
+Write-Host "[5/8] EventBridge bus..." -ForegroundColor Yellow
+aws events delete-event-bus --name "cargotrack-events" --region $region 2>$null
+Write-Host "  done" -ForegroundColor Green
 
-# ── 6. RDS DB Subnet Group ────────────────────────────────────────────────────
-Write-Host "`n[6/8] Cleaning RDS subnet group..." -ForegroundColor Yellow
-aws rds delete-db-subnet-group `
-    --db-subnet-group-name "$project-db-subnet-group" `
-    --region $region 2>$null | Out-Null
-Write-Host "  ✓ cargotrack-db-subnet-group" -ForegroundColor Green
+# 6. RDS Subnet Group
+Write-Host "[6/8] RDS subnet group..." -ForegroundColor Yellow
+aws rds delete-db-subnet-group --db-subnet-group-name "cargotrack-db-subnet-group" --region $region 2>$null
+Write-Host "  done" -ForegroundColor Green
 
-# ── 7. IAM Roles (detach policies first, then delete) ─────────────────────────
-Write-Host "`n[7/8] Cleaning IAM roles..." -ForegroundColor Yellow
+# 7. IAM Roles
+Write-Host "[7/8] IAM roles..." -ForegroundColor Yellow
 
 $clusterPolicies = @(
     "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
     "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
 )
-foreach ($policy in $clusterPolicies) {
-    aws iam detach-role-policy `
-        --role-name "$project-eks-cluster-role" `
-        --policy-arn $policy `
-        --region $region 2>$null | Out-Null
+foreach ($p in $clusterPolicies) {
+    aws iam detach-role-policy --role-name "cargotrack-eks-cluster-role" --policy-arn $p 2>$null
 }
-aws iam delete-role --role-name "$project-eks-cluster-role" --region $region 2>$null | Out-Null
-Write-Host "  ✓ cargotrack-eks-cluster-role" -ForegroundColor Green
+aws iam delete-role --role-name "cargotrack-eks-cluster-role" 2>$null
 
 $nodePolicies = @(
     "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
@@ -86,33 +56,38 @@ $nodePolicies = @(
     "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
     "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 )
-foreach ($policy in $nodePolicies) {
-    aws iam detach-role-policy `
-        --role-name "$project-eks-node-role" `
-        --policy-arn $policy `
-        --region $region 2>$null | Out-Null
+foreach ($p in $nodePolicies) {
+    aws iam detach-role-policy --role-name "cargotrack-eks-node-role" --policy-arn $p 2>$null
 }
-aws iam delete-role --role-name "$project-eks-node-role" --region $region 2>$null | Out-Null
-Write-Host "  ✓ cargotrack-eks-node-role" -ForegroundColor Green
+aws iam delete-role --role-name "cargotrack-eks-node-role" 2>$null
+Write-Host "  done" -ForegroundColor Green
 
-# ── 8. SSM Parameters (legacy paths from database module) ─────────────────────
-Write-Host "`n[8/8] Cleaning legacy SSM parameters..." -ForegroundColor Yellow
-$ssmParams = @(
-    "/$project/database/name",
-    "/$project/database/host",
-    "/$project/database/user",
-    "/$project/database/port",
-    "/$project/application/node-env"
+# 7b. IRSA Roles (inline policies only — no detach needed)
+Write-Host "[7b/8] IRSA roles..." -ForegroundColor Yellow
+$irsaRoles = @(
+    "cargotrack-irsa-core-service",
+    "cargotrack-irsa-document-service",
+    "cargotrack-irsa-ai-service",
+    "cargotrack-irsa-alb-controller",
+    "cargotrack-irsa-cluster-autoscaler",
+    "cargotrack-irsa-eso"
 )
-foreach ($param in $ssmParams) {
-    aws ssm delete-parameter --name $param --region $region 2>$null | Out-Null
-    Write-Host "  ✓ $param" -ForegroundColor Green
+foreach ($r in $irsaRoles) {
+    aws iam delete-role --role-name $r 2>$null
 }
+Write-Host "  done" -ForegroundColor Green
 
-# ── SQS cooldown ──────────────────────────────────────────────────────────────
-Write-Host "`nWaiting 65 seconds for SQS queue-name cooldown..." -ForegroundColor Yellow
-Write-Host "(AWS requires 60s before a queue with the same name can be recreated)" -ForegroundColor Gray
+# 8. Legacy SSM Parameters
+Write-Host "[8/8] SSM parameters..." -ForegroundColor Yellow
+aws ssm delete-parameter --name "/cargotrack/database/name" --region $region 2>$null
+aws ssm delete-parameter --name "/cargotrack/database/host" --region $region 2>$null
+aws ssm delete-parameter --name "/cargotrack/database/user" --region $region 2>$null
+aws ssm delete-parameter --name "/cargotrack/database/port" --region $region 2>$null
+aws ssm delete-parameter --name "/cargotrack/application/node-env" --region $region 2>$null
+Write-Host "  done" -ForegroundColor Green
+
+# SQS cooldown
+Write-Host "Waiting 65s for SQS cooldown..." -ForegroundColor Yellow
 Start-Sleep -Seconds 65
 
-Write-Host "`n=== Cleanup Complete ===" -ForegroundColor Cyan
-Write-Host "You can now run: terraform apply" -ForegroundColor Green
+Write-Host "=== Cleanup complete. Run: terraform apply ===" -ForegroundColor Cyan
