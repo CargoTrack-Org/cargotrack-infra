@@ -47,6 +47,8 @@ $clusterPolicies = @(
 foreach ($p in $clusterPolicies) {
     aws iam detach-role-policy --role-name "cargotrack-eks-cluster-role" --policy-arn $p 2>$null
 }
+$inlinePolicies = (aws iam list-role-policies --role-name "cargotrack-eks-cluster-role" --query "PolicyNames" --output text 2>$null) -split "`t"
+foreach ($p in $inlinePolicies) { if ($p -and $p.Trim() -ne "") { aws iam delete-role-policy --role-name "cargotrack-eks-cluster-role" --policy-name $p.Trim() 2>$null } }
 aws iam delete-role --role-name "cargotrack-eks-cluster-role" 2>$null
 
 $nodePolicies = @(
@@ -59,10 +61,12 @@ $nodePolicies = @(
 foreach ($p in $nodePolicies) {
     aws iam detach-role-policy --role-name "cargotrack-eks-node-role" --policy-arn $p 2>$null
 }
+$inlinePolicies = (aws iam list-role-policies --role-name "cargotrack-eks-node-role" --query "PolicyNames" --output text 2>$null) -split "`t"
+foreach ($p in $inlinePolicies) { if ($p -and $p.Trim() -ne "") { aws iam delete-role-policy --role-name "cargotrack-eks-node-role" --policy-name $p.Trim() 2>$null } }
 aws iam delete-role --role-name "cargotrack-eks-node-role" 2>$null
 Write-Host "  done" -ForegroundColor Green
 
-# 7b. IRSA Roles (inline policies only — no detach needed)
+# 7b. IRSA Roles — must delete inline policies first, then the role
 Write-Host "[7b/8] IRSA roles..." -ForegroundColor Yellow
 $irsaRoles = @(
     "cargotrack-irsa-core-service",
@@ -73,6 +77,12 @@ $irsaRoles = @(
     "cargotrack-irsa-eso"
 )
 foreach ($r in $irsaRoles) {
+    $policies = (aws iam list-role-policies --role-name $r --query "PolicyNames" --output text 2>$null) -split "`t"
+    foreach ($p in $policies) {
+        if ($p -and $p.Trim() -ne "") {
+            aws iam delete-role-policy --role-name $r --policy-name $p.Trim() 2>$null
+        }
+    }
     aws iam delete-role --role-name $r 2>$null
 }
 Write-Host "  done" -ForegroundColor Green
