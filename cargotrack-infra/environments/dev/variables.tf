@@ -71,7 +71,7 @@ variable "eks_ingress_alb_dns" {
   EOT
   type    = string
   # Dev ALB created by AWS LBC for cargotrack-dev ingress (kubectl get ingress -n cargotrack-dev)
-  default = "k8s-cargotrack-faafefcd8d-1983483383.us-east-1.elb.amazonaws.com"
+  default = "k8s-cargotra-cargotra-78a37b4796-321169976.us-east-1.elb.amazonaws.com"
 }
 
 # ─── GitHub OIDC ──────────────────────────────────────────────────────────────
