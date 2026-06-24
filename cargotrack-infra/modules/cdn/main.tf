@@ -146,6 +146,9 @@ resource "aws_cloudfront_distribution" "main" {
       https_port             = 443
       origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
+      # AI endpoints (Textract + Bedrock) can take up to 25s. 60s is the AWS
+      # maximum without a service quota increase and gives ample headroom.
+      origin_read_timeout    = 60
     }
   }
 
