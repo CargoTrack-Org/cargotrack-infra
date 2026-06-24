@@ -720,8 +720,7 @@ resource "kubectl_manifest" "external_secret_prod" {
 #   2. Deletes all Ingress resources in cargotrack-dev AND cargotrack-prod
 #   3. Waits 30s for LBC to deprovision both ALBs
 #
-# Run from GitHub Actions (ubuntu-latest) — bash is always available there.
-# If running locally on Windows, use: 'terraform destroy' from WSL or Git Bash.
+# Uses sh (POSIX shell) — works on Windows (Git for Windows), Linux CI, and macOS.
 
 resource "null_resource" "pre_destroy_ingress_cleanup" {
   triggers = {
@@ -732,15 +731,16 @@ resource "null_resource" "pre_destroy_ingress_cleanup" {
   }
 
   provisioner "local-exec" {
-    when        = destroy
-    interpreter = ["bash", "-c"]
+    when = destroy
+    # Use sh (POSIX shell) — available on Windows via Git for Windows, Linux CI,
+    # and macOS. bash is not guaranteed in PATH on Windows without WSL.
+    interpreter = ["sh", "-c"]
     command     = <<-EOT
-      set -e
       echo "[pre-destroy] Configuring kubectl for ${self.triggers.cluster_name}..."
       aws eks update-kubeconfig \
         --name "${self.triggers.cluster_name}" \
         --region "${self.triggers.aws_region}" \
-        --kubeconfig "/tmp/cargotrack-kube-destroy.conf" 2>/dev/null
+        --kubeconfig "/tmp/cargotrack-kube-destroy.conf" 2>/dev/null || true
 
       echo "[pre-destroy] Deleting Ingress resources in ${self.triggers.ns_dev}..."
       KUBECONFIG="/tmp/cargotrack-kube-destroy.conf" \
@@ -756,8 +756,8 @@ resource "null_resource" "pre_destroy_ingress_cleanup" {
           --timeout=120s \
           --ignore-not-found=true 2>/dev/null || true
 
-      echo "[pre-destroy] Waiting 30s for ALB deprovisioning..."
-      sleep 30
+      echo "[pre-destroy] Waiting 60s for AWS to release ALB Elastic IPs..."
+      sleep 60
       echo "[pre-destroy] Ingress cleanup complete."
     EOT
   }
