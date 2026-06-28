@@ -108,6 +108,27 @@ resource "aws_ssm_parameter" "node_env" {
   overwrite = true
 }
 
+resource "aws_iam_role" "rds_enhanced_monitoring" {
+
+  name = "${var.project_name}-rds-enhanced-monitoring"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "monitoring.rds.amazonaws.com" }
+    }]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "rds_enhanced_monitoring" {
+  role       = aws_iam_role.rds_enhanced_monitoring.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+}
+
 resource "aws_db_subnet_group" "database" {
 
   name = "${var.project_name}-db-subnet-group"
@@ -157,6 +178,12 @@ resource "aws_db_instance" "database" {
   skip_final_snapshot = true
 
   auto_minor_version_upgrade = true
+
+  monitoring_interval = 60
+  monitoring_role_arn = aws_iam_role.rds_enhanced_monitoring.arn
+
+  performance_insights_enabled    = true
+  performance_insights_kms_key_id = aws_kms_key.main.arn
 
   db_subnet_group_name = aws_db_subnet_group.database.name
 

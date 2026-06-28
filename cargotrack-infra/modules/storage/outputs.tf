@@ -7,3 +7,8 @@ output "bucket_arn" {
   description = "S3 bucket ARN"
   value       = aws_s3_bucket.documents.arn
 }
+
+output "access_logs_bucket_id" {
+  description = "S3 access logs bucket name"
+  value       = aws_s3_bucket.access_logs.id
+}

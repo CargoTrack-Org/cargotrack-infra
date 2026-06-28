@@ -156,7 +156,8 @@ module "cdn" {
   acm_certificate_arn = module.dns.certificate_arn
 
   # CloudFront aliases must exactly match the ACM cert's domain names.
-  domain_aliases = var.domain_name != "" ? [var.domain_name, "www.${var.domain_name}"] : []
+  # dev.shopp-novaa.co.in is covered by the wildcard *.shopp-novaa.co.in SAN.
+  domain_aliases = var.domain_name != "" ? [var.domain_name, "www.${var.domain_name}", "dev.${var.domain_name}"] : []
 
   # dns module must complete (cert validated) before CF is created with the cert.
   depends_on = [module.dns]
@@ -205,6 +206,18 @@ resource "aws_route53_record" "cloudfront_www" {
   type    = "CNAME"
   ttl     = 300
   records = [module.cdn.cloudfront_domain_name]
+}
+
+resource "aws_route53_record" "cloudfront_dev" {
+  count   = var.domain_name != "" ? 1 : 0
+  zone_id = module.dns.zone_id
+  name    = "dev.${var.domain_name}"
+  type    = "A"
+  alias {
+    name                   = module.cdn.cloudfront_domain_name
+    zone_id                = "Z2FDTNDATAQYW2"
+    evaluate_target_health = false
+  }
 }
 
 # EKS control plane + managed node group + OIDC provider for IRSA
@@ -354,20 +367,6 @@ module "ecr" {
   project_name      = var.project_name
   eks_node_role_arn = module.eks.node_role_arn
 }
-
-# ── GUARDDUTY — TEMPORARILY DISABLED ─────────────────────────────────────────
-# GuardDuty requires explicit permission in the training account.
-# Re-enable by uncommenting the block below once permission is granted.
-# Threat detection: CloudTrail analysis, VPC Flow Logs, EKS audit logs,
-# S3 data protection, malware scanning on EKS workloads.
-# HIGH/CRITICAL findings (severity >= 7) route to SNS → email if alarm_email is set.
-
-# module "guardduty" {
-#   source       = "../../modules/guardduty"
-#   project_name = var.project_name
-#   alarm_email  = var.alarm_email
-#   kms_key_arn  = module.database.kms_key_arn
-# }
 
 # ── SSM PARAMETER STORE — Operational Configuration ──────────────────────────
 #

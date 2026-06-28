@@ -10,6 +10,8 @@ locals {
     ssmmessages    = "com.amazonaws.${var.aws_region}.ssmmessages"
     ec2messages    = "com.amazonaws.${var.aws_region}.ec2messages"
     kms            = "com.amazonaws.${var.aws_region}.kms"
+    ecr_api        = "com.amazonaws.${var.aws_region}.ecr.api"
+    ecr_dkr        = "com.amazonaws.${var.aws_region}.ecr.dkr"
   }
 }
 

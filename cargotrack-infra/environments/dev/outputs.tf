@@ -164,18 +164,6 @@ output "eso_controller_version" {
   value       = helm_release.external_secrets.version
 }
 
-# GuardDuty outputs — disabled until training account permission is granted
-# Uncomment together with module.guardduty in main.tf
-# output "guardduty_detector_id" {
-#   description = "AWS GuardDuty detector ID"
-#   value       = module.guardduty.detector_id
-# }
-#
-# output "guardduty_findings_rule_arn" {
-#   description = "EventBridge rule ARN for high-severity GuardDuty findings"
-#   value       = module.guardduty.findings_event_rule_arn
-# }
-
 output "irsa_eso_role_arn" {
   description = "IRSA role ARN for External Secrets Operator — annotated on the ESO Helm chart ServiceAccount"
   value       = module.irsa.eso_role_arn
@@ -214,10 +202,7 @@ output "platform_note" {
          kubectl get ingress -n cargotrack-dev
          kubectl get ingress -n cargotrack-prod
 
-    8. GuardDuty detector is active — verify in AWS Console:
-         Security > GuardDuty > Findings
-
-    9. SSM Parameters are populated under /cargotrack/dev/:
+    8. SSM Parameters are populated under /cargotrack/dev/:
          aws ssm get-parameters-by-path --path /cargotrack/dev/ --recursive
     ─────────────────────────────────────────────────────────────────────
   EOT
