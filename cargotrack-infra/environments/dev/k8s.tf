@@ -731,34 +731,22 @@ resource "null_resource" "pre_destroy_ingress_cleanup" {
   }
 
   provisioner "local-exec" {
-    when = destroy
-    # Use sh (POSIX shell) — available on Windows via Git for Windows, Linux CI,
-    # and macOS. bash is not guaranteed in PATH on Windows without WSL.
-    interpreter = ["sh", "-c"]
+    when        = destroy
+    interpreter = ["powershell", "-Command"]
     command     = <<-EOT
-      echo "[pre-destroy] Configuring kubectl for ${self.triggers.cluster_name}..."
-      aws eks update-kubeconfig \
-        --name "${self.triggers.cluster_name}" \
-        --region "${self.triggers.aws_region}" \
-        --kubeconfig "/tmp/cargotrack-kube-destroy.conf" 2>/dev/null || true
+      Write-Host "[pre-destroy] Configuring kubectl for ${self.triggers.cluster_name}..."
+      aws eks update-kubeconfig --name "${self.triggers.cluster_name}" --region "${self.triggers.aws_region}" --kubeconfig "$env:TEMP\cargotrack-kube-destroy.conf" 2>$null
+      $env:KUBECONFIG = "$env:TEMP\cargotrack-kube-destroy.conf"
 
-      echo "[pre-destroy] Deleting Ingress resources in ${self.triggers.ns_dev}..."
-      KUBECONFIG="/tmp/cargotrack-kube-destroy.conf" \
-        kubectl delete ingress --all \
-          -n "${self.triggers.ns_dev}" \
-          --timeout=120s \
-          --ignore-not-found=true 2>/dev/null || true
+      Write-Host "[pre-destroy] Deleting Ingress resources in ${self.triggers.ns_dev}..."
+      kubectl delete ingress --all -n "${self.triggers.ns_dev}" --timeout=120s --ignore-not-found=true 2>$null
 
-      echo "[pre-destroy] Deleting Ingress resources in ${self.triggers.ns_prod}..."
-      KUBECONFIG="/tmp/cargotrack-kube-destroy.conf" \
-        kubectl delete ingress --all \
-          -n "${self.triggers.ns_prod}" \
-          --timeout=120s \
-          --ignore-not-found=true 2>/dev/null || true
+      Write-Host "[pre-destroy] Deleting Ingress resources in ${self.triggers.ns_prod}..."
+      kubectl delete ingress --all -n "${self.triggers.ns_prod}" --timeout=120s --ignore-not-found=true 2>$null
 
-      echo "[pre-destroy] Waiting 60s for AWS to release ALB Elastic IPs..."
-      sleep 60
-      echo "[pre-destroy] Ingress cleanup complete."
+      Write-Host "[pre-destroy] Waiting 90s for AWS to release ALB Elastic IPs..."
+      Start-Sleep -Seconds 90
+      Write-Host "[pre-destroy] Ingress cleanup complete."
     EOT
   }
 
