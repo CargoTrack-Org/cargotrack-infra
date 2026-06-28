@@ -1,8 +1,5 @@
 name: Terraform — Validate, Plan & Apply
 
-# ─── Triggers ─────────────────────────────────────────────────────────────────
-# This workflow lives in cargotrack-infra repo.
-# Triggers on changes to any .tf file or the workflow itself.
 on:
   push:
     branches: [main]
@@ -15,21 +12,17 @@ on:
       - 'cargotrack-infra/**'
   workflow_dispatch:
 
-# ─── Permissions ──────────────────────────────────────────────────────────────
 permissions:
-  id-token: write        # OIDC → AWS
+  id-token: write
   contents: read
-  pull-requests: write   # Post plan output as PR comment
-  security-events: write # Upload tfsec SARIF
+  pull-requests: write
+  security-events: write
 
 env:
   TF_WORKING_DIR: cargotrack-infra/environments/dev
   AWS_REGION: us-east-1
 
 jobs:
-  # ════════════════════════════════════════════════════════════════════════════
-  # JOB 1: tfsec — Terraform security scan
-  # ════════════════════════════════════════════════════════════════════════════
   tfsec:
     name: tfsec Security Scan
     runs-on: ubuntu-latest
@@ -64,9 +57,6 @@ jobs:
           sarif_file: results.sarif
           category: tfsec
 
-  # ════════════════════════════════════════════════════════════════════════════
-  # JOB 2: Terraform Validate & Plan
-  # ════════════════════════════════════════════════════════════════════════════
   terraform-plan:
     name: Terraform Validate & Plan
     runs-on: ubuntu-latest
@@ -131,24 +121,12 @@ jobs:
               body: `## Terraform Plan — \`cargotrack-infra/environments/dev\`\n\n\`\`\`hcl\n${truncated}\n\`\`\``
             });
 
-  # ════════════════════════════════════════════════════════════════════════════
-  # JOB 3: Terraform Apply — requires manual approval via GitHub Environment
-  #
-  # HOW THE APPROVAL GATE WORKS:
-  #   1. This job targets the "production" GitHub Environment
-  #   2. Go to cargotrack-infra repo → Settings → Environments → production
-  #   3. Add "Required reviewers" (your GitHub username)
-  #   4. When this job is reached, GitHub pauses and emails you for approval
-  #   5. Approve in the GitHub UI → terraform apply runs
-  #
-  # Only runs on push to main (not on PRs — PRs only plan).
-  # ════════════════════════════════════════════════════════════════════════════
   terraform-apply:
     name: Terraform Apply (requires approval)
     runs-on: ubuntu-latest
     needs: [terraform-plan]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    environment: production   # ← This is the manual approval gate
+    environment: production
 
     steps:
       - name: Checkout code
@@ -165,22 +143,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_INFRA_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ── Grant Terraform CI role EKS cluster-admin access ─────────────────────
-      # WHY THIS STEP EXISTS:
-      #   The Terraform Kubernetes/Helm/kubectl providers call the EKS Kubernetes
-      #   API (k8s.tf resources). The EKS cluster must recognise the CI IAM role
-      #   as a cluster admin, otherwise all k8s resource operations fail with:
-      #     Error: Unauthorized
-      #
-      # WHY NOT IN Terraform state:
-      #   Granting EKS access IN Terraform creates a chicken-and-egg: Terraform
-      #   needs EKS access to apply, but EKS access is created by the apply.
-      #   Putting it in a workflow pre-step breaks the cycle.
-      #
-      # IDEMPOTENCY:
-      #   All AWS CLI calls here are idempotent. Errors caused by
-      #   "already exists" are suppressed with 2>/dev/null || true.
-      #   The cluster mode upgrade only runs when currently in CONFIG_MAP mode.
       - name: Grant CI role EKS cluster-admin access (idempotent)
         run: |
           set -euo pipefail
@@ -198,8 +160,6 @@ jobs:
 
           if [ "$CURRENT_MODE" = "CONFIG_MAP" ]; then
             echo "==> Upgrading cluster to API_AND_CONFIG_MAP auth mode..."
-            # Capture the update ID so we can wait on the specific update,
-            # not on cluster.status (which is always ACTIVE).
             UPDATE_ID=$(aws eks update-cluster-config \
               --name "$CLUSTER" \
               --access-config authenticationMode=API_AND_CONFIG_MAP \
@@ -209,9 +169,6 @@ jobs:
             echo "    Update ID: $UPDATE_ID"
             echo "    Waiting for auth mode to become API_AND_CONFIG_MAP (max 5 min)..."
             for i in $(seq 1 30); do
-              # Poll the actual auth mode — only becomes API_AND_CONFIG_MAP
-              # once the update is fully applied. cluster.status is ALWAYS
-              # ACTIVE and must NOT be used here (causes premature break).
               AUTH_MODE=$(aws eks describe-cluster \
                 --name "$CLUSTER" --region "$REGION" \
                 --query 'cluster.accessConfig.authenticationMode' \
@@ -230,7 +187,6 @@ jobs:
               fi
               sleep 10
             done
-            # Final check: fail fast rather than continue with wrong auth mode
             FINAL_MODE=$(aws eks describe-cluster \
               --name "$CLUSTER" --region "$REGION" \
               --query 'cluster.accessConfig.authenticationMode' --output text)

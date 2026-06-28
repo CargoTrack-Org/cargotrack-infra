@@ -25,12 +25,8 @@ variable "vpc_cidr" {
 variable "alarm_email" {
   description = "Email address for CloudWatch alarm SNS notifications"
   type        = string
-  # Set to project team email — SNS subscription is created and pending confirmation.
-  # Change to null to disable email alerts.
   default     = "abhibee27@gmail.com"
 }
-
-# ─── EKS variables ────────────────────────────────────────────────────────────
 
 variable "eks_cluster_version" {
   description = "Kubernetes version for the EKS cluster"
@@ -47,7 +43,6 @@ variable "node_instance_types" {
 variable "node_min_size" {
   description = "Minimum number of EKS worker nodes"
   type        = number
-  # 2 nodes minimum for high-availability (dev and prod namespaces share cluster)
   default     = 2
 }
 
@@ -70,11 +65,8 @@ variable "eks_ingress_alb_dns" {
       kubectl get ingress -n cargotrack-dev -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
   EOT
   type    = string
-  # Dev ALB created by AWS LBC for cargotrack-dev ingress (kubectl get ingress -n cargotrack-dev)
   default = "k8s-cargotra-cargotra-78a37b4796-321169976.us-east-1.elb.amazonaws.com"
 }
-
-# ─── GitHub OIDC ──────────────────────────────────────────────────────────────
 
 variable "github_repository" {
   description = "GitHub repository in OrgName/RepoName format — scopes the GitHub Actions OIDC trust policy to this repo only"
@@ -93,6 +85,5 @@ variable "domain_name" {
     (dns_name_servers) to your domain registrar to complete DNS delegation.
   EOT
   type    = string
-  # ── Domain is now configured — enables Route53 + ACM + CloudFront HTTPS ──
   default = "shopp-novaa.co.in"
 }

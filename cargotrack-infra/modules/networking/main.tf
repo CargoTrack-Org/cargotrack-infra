@@ -8,10 +8,6 @@ locals {
     ManagedBy = "Terraform"
   }
 
-  # EKS subnet discovery — maps tier to the required kubernetes.io tags.
-  # AWS Load Balancer Controller uses these to find subnets when creating ALBs.
-  # "elb"          = public subnets  (external-facing ALBs / NLBs)
-  # "internal-elb" = web/app subnets (internal ALBs)
   eks_elb_role = {
     public = "1"
     web    = "0"
@@ -108,7 +104,6 @@ resource "aws_subnet" "subnets" {
       Name = "${var.project_name}-${each.key}"
       Tier = each.value.tier
 
-      # EKS subnet discovery tags (required for AWS Load Balancer Controller)
       "kubernetes.io/cluster/${var.project_name}" = "shared"
       "kubernetes.io/role/elb"                    = local.eks_elb_role[each.value.tier]
       "kubernetes.io/role/internal-elb"           = local.eks_internal_elb_role[each.value.tier]

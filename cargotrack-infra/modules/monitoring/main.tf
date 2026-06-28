@@ -4,8 +4,6 @@ locals {
     ManagedBy = "Terraform"
   }
 
-  # EC2/ASG-specific alarms — only created when backend_asg_name is provided.
-  # When running on EKS, these are omitted (var defaults to "").
   asg_alarms = var.backend_asg_name != "" ? {
     backend_cpu_high = {
       alarm_name          = "${var.project_name}-backend-cpu-high"
@@ -23,7 +21,6 @@ locals {
     }
   } : {}
 
-  # ALB-specific alarms — only created when external_alb_arn_suffix is provided.
   alb_alarms = var.external_alb_arn_suffix != "" ? {
     alb_5xx_errors = {
       alarm_name          = "${var.project_name}-alb-5xx-errors"
@@ -56,7 +53,6 @@ locals {
     }
   } : {}
 
-  # RDS alarm — always active regardless of compute model
   rds_alarms = {
     rds_cpu_high = {
       alarm_name          = "${var.project_name}-rds-cpu-high"
@@ -81,7 +77,7 @@ locals {
       statistic           = "Average"
       period              = 300
       evaluation_periods  = 2
-      threshold           = var.rds_storage_threshold_gb * 1073741824 # GB → bytes
+      threshold           = var.rds_storage_threshold_gb * 1073741824
       comparison_operator = "LessThanThreshold"
       dimensions = {
         DBInstanceIdentifier = var.db_identifier
@@ -89,8 +85,6 @@ locals {
     }
   }
 
-  # EKS / Container Insights alarms — only created when eks_cluster_name is provided.
-  # Metrics are published by the amazon-cloudwatch-observability add-on.
   eks_alarms = var.eks_cluster_name != "" ? {
     eks_node_cpu_high = {
       alarm_name          = "${var.project_name}-eks-node-cpu-high"
@@ -138,7 +132,6 @@ locals {
     }
   } : {}
 
-  # SQS depth alarm — only created when compliance_queue_name is provided.
   sqs_alarms = var.compliance_queue_name != "" ? {
     sqs_compliance_depth_high = {
       alarm_name          = "${var.project_name}-sqs-compliance-depth-high"
@@ -156,11 +149,8 @@ locals {
     }
   } : {}
 
-  # Merge all alarm maps — only non-empty maps contribute entries
   alarms = merge(local.asg_alarms, local.alb_alarms, local.rds_alarms, local.eks_alarms, local.sqs_alarms)
 
-  # Dashboard widgets — built conditionally to avoid empty-string metric dimensions
-  # CloudWatch rejects widgets whose dimension values are empty strings.
   asg_widgets = var.backend_asg_name != "" ? [
     {
       type   = "metric"
@@ -333,9 +323,6 @@ resource "aws_sns_topic" "alarms" {
 
   name = "${var.project_name}-alarms"
 
-  # Encrypt the SNS topic with the shared CargoTrack KMS CMK.
-  # The KMS key policy in modules/database/kms.tf already grants SNS
-  # GenerateDataKey + Decrypt, so no additional policy is needed.
   kms_master_key_id = var.kms_key_arn
 
   tags = local.common_tags
@@ -381,4 +368,3 @@ resource "aws_cloudwatch_dashboard" "main" {
     widgets = local.dashboard_widgets
   })
 }
-

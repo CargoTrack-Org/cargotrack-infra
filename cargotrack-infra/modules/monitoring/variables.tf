@@ -36,15 +36,11 @@ variable "kms_key_arn" {
   type        = string
 }
 
-# ── EKS / Container Insights ──────────────────────────────────────────────────
-
 variable "eks_cluster_name" {
   description = "EKS cluster name — used for Container Insights alarms. Leave empty to skip EKS alarms."
   type        = string
   default     = ""
 }
-
-# ── SQS ───────────────────────────────────────────────────────────────────────
 
 variable "compliance_queue_name" {
   description = "Name of the SQS compliance trigger queue — used for queue depth alarm. Leave empty to skip."
@@ -58,11 +54,8 @@ variable "sqs_depth_threshold" {
   default     = 100
 }
 
-# ── RDS ───────────────────────────────────────────────────────────────────────
-
 variable "rds_storage_threshold_gb" {
   description = "RDS free storage alarm threshold in GB. Alert fires when storage drops below this value."
   type        = number
   default     = 5
 }
-

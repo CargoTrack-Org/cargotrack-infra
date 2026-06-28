@@ -1,5 +1,3 @@
-# ── EKS outputs (used for kubectl config and Helm values injection) ───────────
-
 output "eks_cluster_name" {
   description = "EKS cluster name — use with: aws eks update-kubeconfig --name <value>"
   value       = module.eks.cluster_name
@@ -14,8 +12,6 @@ output "eks_oidc_issuer_url" {
   description = "OIDC issuer URL for IRSA verification"
   value       = module.eks.oidc_issuer_url
 }
-
-# ── IRSA role ARNs (inject into Helm values-dev.yaml for ServiceAccount annotations)
 
 output "irsa_core_service_role_arn" {
   description = "IRSA role ARN for core-service — annotate ServiceAccount in Helm"
@@ -41,8 +37,6 @@ output "irsa_cluster_autoscaler_role_arn" {
   description = "IRSA role ARN for Cluster Autoscaler (kube-system:cluster-autoscaler)"
   value       = module.irsa.cluster_autoscaler_role_arn
 }
-
-# ── AWS resource identifiers (used in Helm values for microservice env vars) ──
 
 output "rds_endpoint" {
   description = "RDS PostgreSQL endpoint"
@@ -86,26 +80,6 @@ output "application_secret_arn" {
   value       = module.database.application_secret_arn
 }
 
-# CDN outputs — disabled while module.cdn is commented out
-# Re-enable together with module.cdn in main.tf when domain_name is configured.
-#
-# output "cloudfront_domain_name" {
-#   description = "CloudFront distribution domain — access the application at https://<value>"
-#   value       = module.cdn.cloudfront_domain_name
-# }
-#
-# output "cloudfront_distribution_id" {
-#   description = "CloudFront distribution ID — use for cache invalidations"
-#   value       = module.cdn.cloudfront_distribution_id
-# }
-#
-# output "waf_web_acl_arn" {
-#   description = "WAF Web ACL ARN attached to CloudFront"
-#   value       = module.cdn.waf_web_acl_arn
-# }
-
-# ── ECR outputs ───────────────────────────────────────────────────────────────
-
 output "ecr_repository_urls" {
   description = <<-EOT
     Map of service name → ECR repository URL.
@@ -125,8 +99,6 @@ output "github_actions_ecr_role_arn" {
   value       = module.ecr.github_actions_role_arn
 }
 
-# ── DNS outputs (populated only when domain_name is set) ─────────────────────
-
 output "dns_name_servers" {
   description = "Route 53 NS records — configure at your domain registrar to complete DNS delegation (empty when domain_name is not set)"
   value       = module.dns.zone_name_servers
@@ -141,8 +113,6 @@ output "dns_enabled" {
   description = "True when a domain was provided and DNS resources were created"
   value       = module.dns.dns_enabled
 }
-
-# ── Kubernetes platform outputs ───────────────────────────────────────────────
 
 output "argocd_namespace" {
   description = "Namespace where ArgoCD is installed"

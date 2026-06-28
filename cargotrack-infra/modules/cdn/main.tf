@@ -132,8 +132,6 @@ resource "aws_cloudfront_distribution" "main" {
 
   web_acl_id = aws_wafv2_web_acl.main.arn
 
-  # When a custom domain + ACM cert is provided, register both apex and www
-  # as CloudFront aliases so CF accepts requests with those Host headers.
   aliases = var.domain_aliases
 
   origin {
@@ -146,8 +144,6 @@ resource "aws_cloudfront_distribution" "main" {
       https_port             = 443
       origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
-      # AI endpoints (Textract + Bedrock) can take up to 25s. 60s is the AWS
-      # maximum without a service quota increase and gives ample headroom.
       origin_read_timeout    = 60
     }
   }
@@ -182,12 +178,6 @@ resource "aws_cloudfront_distribution" "main" {
     }
   }
 
-  # ── TLS Certificate ──────────────────────────────────────────────────────────
-  # When acm_certificate_arn is set (custom domain configured):
-  #   - Use the ACM cert so the domain is served over HTTPS with a valid cert
-  #   - minimum_protocol_version must be set when using a custom cert
-  # When empty (no domain configured):
-  #   - Use the free CloudFront default certificate (*.cloudfront.net)
   viewer_certificate {
     acm_certificate_arn            = var.acm_certificate_arn != "" ? var.acm_certificate_arn : null
     cloudfront_default_certificate = var.acm_certificate_arn == ""

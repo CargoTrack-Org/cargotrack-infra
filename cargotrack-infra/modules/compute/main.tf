@@ -536,13 +536,6 @@ resource "aws_lb_listener" "internal_http" {
   }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# AUTO SCALING — Target Tracking Policies
-# Target: 50% average CPU utilisation across the ASG.
-# AWS automatically creates and manages the underlying CloudWatch alarms
-# for scale-out (CPU > 50%) and scale-in (CPU < 50%) via target tracking.
-# ─────────────────────────────────────────────────────────────────────────────
-
 resource "aws_autoscaling_policy" "frontend_cpu" {
 
   name                   = "${var.project_name}-frontend-cpu-tracking"
@@ -557,7 +550,6 @@ resource "aws_autoscaling_policy" "frontend_cpu" {
 
     target_value = 50.0
 
-    # Allow 5 minutes for a new instance to become healthy before scaling in
     disable_scale_in = false
   }
 }
@@ -579,13 +571,6 @@ resource "aws_autoscaling_policy" "backend_cpu" {
     disable_scale_in = false
   }
 }
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CLOUDWATCH ALARMS — CPU Monitoring (supplemental / for SNS notifications)
-# The target-tracking policies above already fire alarms internally.
-# These explicit alarms send notifications to an SNS topic so operators
-# are alerted when scaling events occur.
-# ─────────────────────────────────────────────────────────────────────────────
 
 resource "aws_cloudwatch_metric_alarm" "frontend_cpu_high" {
 

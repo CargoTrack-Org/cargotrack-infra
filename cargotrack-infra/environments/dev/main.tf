@@ -1,12 +1,3 @@
-# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-# CargoTrack v3 \u2014 Dev Environment
-# Migrated from EC2/ASG \u2192 EKS microservices architecture
-# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-# ── NETWORKING ────────────────────────────────────────────────────────────────
-# VPC, 8 subnets (public/web/app/db), NAT gateway, route tables
-# Now includes EKS subnet discovery tags (kubernetes.io/role/*)
-
 module "networking" {
 
   source = "../../modules/networking"
@@ -14,10 +5,6 @@ module "networking" {
   project_name = var.project_name
   vpc_cidr     = var.vpc_cidr
 }
-
-# ── SECURITY ──────────────────────────────────────────────────────────────────
-# Security groups for all tiers including new eks_node SG
-# database SG now allows connections from eks_node SG (port 5432)
 
 module "security" {
 
@@ -27,10 +14,6 @@ module "security" {
 
   vpc_id = module.networking.vpc_id
 }
-
-# ── DATABASE ─────────────────────────────────────────────────────────────────
-# RDS PostgreSQL, KMS key, Secrets Manager secrets, SSM parameters
-# Unchanged from v2 — fully decoupled from compute model
 
 module "database" {
 
@@ -43,10 +26,6 @@ module "database" {
   database_sg_id = module.security.database_sg_id
 }
 
-# ── STORAGE ───────────────────────────────────────────────────────────────────
-# S3 document bucket with KMS encryption, versioning, lifecycle rules
-# Unchanged from v2
-
 module "storage" {
 
   source = "../../modules/storage"
@@ -56,10 +35,6 @@ module "storage" {
   kms_key_arn = module.database.kms_key_arn
 }
 
-# ── AUDIT ─────────────────────────────────────────────────────────────────────
-# DynamoDB audit table — stores compliance and shipment event records
-# Unchanged from v2
-
 module "audit" {
 
   source = "../../modules/audit"
@@ -67,11 +42,6 @@ module "audit" {
   project_name = var.project_name
   kms_key_arn  = module.database.kms_key_arn
 }
-
-# ── EVENTING ─────────────────────────────────────────────────────────────────
-# EventBridge custom bus, SQS queues (main + compliance DLQ/queue),
-# Lambda document processor, EventBridge rules
-# Phase 3 compliance queue additions included
 
 module "eventing" {
 
@@ -85,11 +55,6 @@ module "eventing" {
   audit_table_arn  = module.audit.table_arn
 }
 
-# ── MONITORING ────────────────────────────────────────────────────────────────
-# SNS alarms topic, CloudWatch alarms, dashboard
-# ASG/ALB-specific alarms omitted (vars default to "" \u2014 handled in module)
-# RDS alarm always active
-
 module "monitoring" {
 
   source = "../../modules/monitoring"
@@ -97,28 +62,14 @@ module "monitoring" {
   project_name = var.project_name
   aws_region   = var.aws_region
 
-  # EC2/ASG references removed — module will skip those alarms
-  # backend_asg_name        = (not set — defaults to "")
-  # external_alb_arn_suffix = (not set — defaults to "")
-
   db_identifier = module.database.db_identifier
   alarm_email   = var.alarm_email
   kms_key_arn   = module.database.kms_key_arn
 
-  # EKS Container Insights alarms
-  # Use var.project_name directly — statically known at plan time.
-  # (module.eks.cluster_name is computed, making for_each keys unknown before apply.)
   eks_cluster_name = var.project_name
 
-  # SQS compliance queue depth alarm
-  # Queue name = "${project_name}-compliance-trigger" by construction in eventing module.
-  # Using static interpolation avoids an unknown for_each key during plan.
   compliance_queue_name = "${var.project_name}-compliance-trigger"
 }
-
-# ── VPC ENDPOINTS ────────────────────────────────────────────────────────────
-# Private connectivity to AWS services (S3 Gateway, SSM, Secrets Manager, KMS)
-# Endpoints SG updated to allow from eks_node SG
 
 module "endpoints" {
 
@@ -128,7 +79,7 @@ module "endpoints" {
   vpc_id         = module.networking.vpc_id
   aws_region     = var.aws_region
   app_subnet_ids = module.networking.app_subnet_ids
-  backend_sg_id  = module.security.eks_node_sg_id # eks_node replaces old backend SG here
+  backend_sg_id  = module.security.eks_node_sg_id
 
   private_route_table_ids = [
     module.networking.web_route_table_id,
@@ -137,38 +88,21 @@ module "endpoints" {
   ]
 }
 
-# ── CDN (CloudFront + WAF v2) ─────────────────────────────────────────────────
-# Re-enabled: ALB DNS is known (terraform.tfvars: eks_ingress_alb_dns).
-# Architecture: User → CloudFront (HTTPS + WAF) → ALB HTTP:80 → EKS pods
-# WAF rules: IP Reputation, OWASP Core, Known Bad Inputs, SQLi protection.
-
 module "cdn" {
 
   source = "../../modules/cdn"
 
   project_name = var.project_name
 
-  # ALB DNS from terraform.tfvars (retrieved via kubectl get ingress).
   alb_dns_name = var.eks_ingress_alb_dns
 
-  # Pass the validated ACM cert from the dns module.
-  # When domain_name = "", dns.certificate_arn = "" and CF uses its default cert.
   acm_certificate_arn = module.dns.certificate_arn
 
-  # CloudFront aliases must exactly match the ACM cert's domain names.
-  # dev.shopp-novaa.co.in is covered by the wildcard *.shopp-novaa.co.in SAN.
   domain_aliases = var.domain_name != "" ? [var.domain_name, "www.${var.domain_name}", "dev.${var.domain_name}"] : []
 
-  # dns module must complete (cert validated) before CF is created with the cert.
   depends_on = [module.dns]
 }
 
-
-# ── DNS (Route53 + ACM) ───────────────────────────────────────────────────────
-# Conditional on domain_name being set. All resources inside use count = 0
-# when domain_name = "", so this is completely safe to always include.
-# The cloudfront_domain_name variable is removed from this module — A-records
-# now live at environment level (see aws_route53_record blocks below).
 
 module "dns" {
 
@@ -182,10 +116,6 @@ module "dns" {
     aws.us_east_1 = aws.us_east_1
   }
 }
-
-# Route 53 A-records — created once module.cdn is available
-# apex (shopp-novaa.co.in) and www alias to CloudFront distribution
-# count = 0 when domain_name = "" (safe no-op)
 
 resource "aws_route53_record" "cloudfront_apex" {
   count   = var.domain_name != "" ? 1 : 0
@@ -220,9 +150,6 @@ resource "aws_route53_record" "cloudfront_dev" {
   }
 }
 
-# EKS control plane + managed node group + OIDC provider for IRSA
-# Replaces the EC2/ASG-based compute module
-
 module "eks" {
 
   source = "../../modules/eks"
@@ -239,41 +166,6 @@ module "eks" {
   node_desired_size   = var.node_desired_size
 }
 
-# ── RDS ingress from EKS worker nodes ─────────────────────────────────────────
-#
-# WHY THIS IS AT THE ENVIRONMENT LEVEL (not inside module.security):
-#
-#   EKS managed node groups receive security groups from TWO sources:
-#
-#   1. cargotrack-eks_node-sg  (Terraform-managed, created by module.security)
-#      Passed to aws_eks_cluster.vpc_config.security_group_ids.
-#      AWS attaches this to CONTROL PLANE ENIs only — the cross-account ENIs
-#      EKS creates in your VPC to enable cluster-to-node communication.
-#      Worker node EC2 instances do NOT carry this SG.
-#
-#   2. eks-cluster-sg-cargotrack-* (auto-created by AWS at cluster creation time)
-#      Exposed as: aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
-#      module.eks output: module.eks.cluster_sg_id
-#      AWS automatically attaches this to EVERY managed node ENI. This is the
-#      SG that controls actual inbound/outbound traffic on the worker nodes.
-#
-#   Consequence: Any RDS ingress rule that references cargotrack-eks_node-sg (#1)
-#   has NO effect because the worker nodes never carry that SG. The previous rule
-#   `database_from_eks_node` in module.security was wrong — it referenced #1.
-#
-# WHY IT CANNOT LIVE IN module.security:
-#   module.security is instantiated before module.eks (EKS needs the eks_node SG).
-#   cluster_sg_id (#2) is only known after the EKS cluster is created.
-#   Putting this rule inside module.security would create a circular dependency.
-#
-#   At the environment level, both outputs are available with no cycle:
-#     module.security.database_sg_id  ← security group to protect (RDS)
-#     module.eks.cluster_sg_id        ← source of the traffic (worker nodes)
-#
-# DESTROY SAFETY:
-#   Terraform destroys this rule before either module (dependency graph reversal).
-#   No dangling SG rules after destroy.
-
 resource "aws_vpc_security_group_ingress_rule" "database_from_cluster_sg" {
 
   security_group_id            = module.security.database_sg_id
@@ -289,26 +181,6 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_cluster_sg" {
     Purpose   = "Allow EKS worker nodes to reach RDS PostgreSQL on port 5432"
   }
 }
-
-# ── VPC Endpoint ingress from EKS cluster SG ──────────────────────────────────
-#
-# WHY THIS IS NEEDED (same design constraint as the RDS rule above):
-#
-#   The endpoints module creates a security group allowing inbound 443 from
-#   var.backend_sg_id (= module.security.eks_node_sg_id = the Terraform-managed
-#   cargotrack-eks_node-sg). However, worker node pods carry the auto-created
-#   eks-cluster-sg-cargotrack-* (cluster_sg_id), NOT cargotrack-eks_node-sg.
-#
-#   Consequence: ESO (external-secrets namespace), and any pod that accesses
-#   Secrets Manager, SSM, or KMS via VPC endpoints, gets a TCP timeout because
-#   the endpoint SG rejects their connections.
-#
-#   Error observed:
-#     "dial tcp 10.0.22.35:443: i/o timeout"   ← Secrets Manager VPC endpoint IP
-#     "dial tcp 10.0.21.46:443: i/o timeout"
-#
-#   This rule adds the cluster SG as an allowed source, fixing ESO sync and
-#   any other pod-to-AWS-service communication through interface endpoints.
 
 resource "aws_vpc_security_group_ingress_rule" "endpoints_from_cluster_sg" {
 
@@ -327,11 +199,6 @@ resource "aws_vpc_security_group_ingress_rule" "endpoints_from_cluster_sg" {
 }
 
 
-
-# ── IRSA (IAM Roles for Service Accounts) ─────────────────────────────────────
-# Per-service IAM roles scoped to exact Kubernetes service account names.
-# Each microservice gets only the permissions it needs (least privilege).
-# Role ARNs are passed into Helm values for ServiceAccount annotations.
 
 module "irsa" {
 
@@ -352,14 +219,6 @@ module "irsa" {
   app_secret_arn       = module.database.application_secret_arn
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# CargoTrack v3 — Dev Environment
-# Migrated from EC2/ASG → EKS microservices architecture
-# CI/CD managed by GitHub Actions (see .github/workflows/infra.yml)
-# ──────────────────────────────────────────────────────────────────────────────
-
-# Images must be pushed before pods can be scheduled (CI/CD responsibility).
-
 module "ecr" {
 
   source = "../../modules/ecr"
@@ -367,24 +226,6 @@ module "ecr" {
   project_name      = var.project_name
   eks_node_role_arn = module.eks.node_role_arn
 }
-
-# ── SSM PARAMETER STORE — Operational Configuration ──────────────────────────
-#
-# DESIGN RATIONALE:
-#   All non-sensitive operational configuration is stored in SSM Parameter Store.
-#   This provides:
-#   - Centralized config management (no hardcoded values in Kubernetes manifests)
-#   - Audit trail (CloudTrail tracks all GetParameter calls)
-#   - IAM-scoped access (ESO and services read /cargotrack/* only)
-#   - Change management (config changes visible in SSM console, not just Terraform state)
-#   - Future readiness (services can read config directly via SSM SDK if needed)
-#
-# SENSITIVE VALUES are NOT stored here. Database password, JWT secret, and admin
-# password remain in AWS Secrets Manager (module.database) and are synced to
-# Kubernetes via ESO ExternalSecret → kubernetes_secret.
-#
-# HIERARCHY: /cargotrack/{environment}/{category}/{key}
-# ESO's IRSA policy grants ssm:GetParameter on arn:...:parameter/cargotrack/*
 
 resource "aws_ssm_parameter" "db_host" {
   name  = "/cargotrack/${var.environment}/database/host"
@@ -516,4 +357,3 @@ resource "aws_ssm_parameter" "app_secret_arn" {
     Service  = "secretsmanager"
   }
 }
-

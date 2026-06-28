@@ -236,15 +236,10 @@ resource "aws_cloudwatch_event_target" "sqs" {
   arn            = aws_sqs_queue.main.arn
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PHASE 3: Compliance Pipeline
-# EventBridge rule: shipment.status_updated → compliance SQS queue → ai-service
-# ─────────────────────────────────────────────────────────────────────────────
-
 resource "aws_sqs_queue" "compliance_dlq" {
 
   name                      = "${var.project_name}-compliance-trigger-dlq"
-  message_retention_seconds = 1209600 # 14 days
+  message_retention_seconds = 1209600
 
   kms_master_key_id = var.kms_key_arn
 
@@ -254,8 +249,8 @@ resource "aws_sqs_queue" "compliance_dlq" {
 resource "aws_sqs_queue" "compliance" {
 
   name                       = "${var.project_name}-compliance-trigger"
-  visibility_timeout_seconds = 300   # 5 minutes — matches ai-service consumer timeout
-  message_retention_seconds  = 86400 # 24 hours
+  visibility_timeout_seconds = 300
+  message_retention_seconds  = 86400
 
   kms_master_key_id = var.kms_key_arn
 
@@ -267,7 +262,6 @@ resource "aws_sqs_queue" "compliance" {
   tags = local.common_tags
 }
 
-# SQS queue policy: allow EventBridge to publish to the compliance queue
 data "aws_iam_policy_document" "compliance_sqs_policy" {
 
   statement {
@@ -295,8 +289,6 @@ resource "aws_sqs_queue_policy" "compliance" {
   policy    = data.aws_iam_policy_document.compliance_sqs_policy.json
 }
 
-# EventBridge rule: route shipment status updates to compliance queue
-# Triggers when admin updates a shipment to IN_TRANSIT or DELIVERED status
 resource "aws_cloudwatch_event_rule" "compliance_trigger" {
 
   name           = "${var.project_name}-compliance-trigger"
@@ -321,8 +313,6 @@ resource "aws_cloudwatch_event_target" "compliance_sqs" {
   arn            = aws_sqs_queue.compliance.arn
 }
 
-# IAM policy allowing the EC2/ECS ai-service role to consume from compliance queue
-# Attach to the compute module EC2 role via var.ec2_role_name
 data "aws_iam_policy_document" "ai_service_sqs" {
 
   statement {
@@ -349,7 +339,6 @@ data "aws_iam_policy_document" "ai_service_sqs" {
     sid       = "ComplianceSQSPublish"
     actions   = ["sqs:SendMessage"]
     resources = [aws_sqs_queue.compliance.arn]
-    # core-service publishes to this queue when SQS_COMPLIANCE_QUEUE_URL is set
   }
 }
 

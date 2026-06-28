@@ -6,26 +6,17 @@ locals {
     ManagedBy = "Terraform"
   }
 
-  # Strip the https:// prefix from the OIDC issuer URL for use in condition keys
   oidc_host = replace(var.oidc_issuer_url, "https://", "")
 
-  # Service account namespace — microservices live in both dev and prod namespaces
-  # Both namespaces are trusted in the OIDC conditions (explicit list, not wildcard)
   namespaces = ["cargotrack-dev", "cargotrack-prod"]
 
-  # Map of service names to their Kubernetes service account names
-  # Keys must match the Helm chart serviceAccount.name values exactly
   services = {
     core_service     = "core-service"
     document_service = "document-service"
     ai_service       = "ai-service"
-    alb_controller   = "aws-load-balancer-controller" # installed in kube-system
+    alb_controller   = "aws-load-balancer-controller"
   }
 }
-
-# \u2500\u2500\u2500 Reusable OIDC trust policy factory \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-# Each trust policy allows a specific Kubernetes service account to assume
-# the corresponding IAM role using IRSA (IAM Roles for Service Accounts).
 
 data "aws_iam_policy_document" "core_assume" {
   statement {
@@ -38,7 +29,6 @@ data "aws_iam_policy_document" "core_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
-      # Trust core-service SA in BOTH namespaces (dev + prod, same cluster)
       values = [
         "system:serviceaccount:cargotrack-dev:${local.services.core_service}",
         "system:serviceaccount:cargotrack-prod:${local.services.core_service}",
@@ -63,7 +53,6 @@ data "aws_iam_policy_document" "document_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
-      # Trust document-service SA in BOTH namespaces (dev + prod, same cluster)
       values = [
         "system:serviceaccount:cargotrack-dev:${local.services.document_service}",
         "system:serviceaccount:cargotrack-prod:${local.services.document_service}",
@@ -88,7 +77,6 @@ data "aws_iam_policy_document" "ai_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
-      # Trust ai-service SA in BOTH namespaces (dev + prod, same cluster)
       values = [
         "system:serviceaccount:cargotrack-dev:${local.services.ai_service}",
         "system:serviceaccount:cargotrack-prod:${local.services.ai_service}",
@@ -123,8 +111,6 @@ data "aws_iam_policy_document" "alb_controller_assume" {
   }
 }
 
-# \u2500\u2500\u2500 IAM Roles \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
 resource "aws_iam_role" "core_service" {
   name               = "${var.project_name}-irsa-core-service"
   assume_role_policy = data.aws_iam_policy_document.core_assume.json
@@ -149,11 +135,7 @@ resource "aws_iam_role" "alb_controller" {
   tags               = merge(local.common_tags, { Service = "aws-load-balancer-controller" })
 }
 
-# \u2500\u2500\u2500 Core Service permissions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-# core-service: auth, shipments, admin, EventBridge, S3, Secrets Manager, SQS
-
 data "aws_iam_policy_document" "core_service" {
-  # S3: document bucket access (admin document listing)
   statement {
     sid     = "S3Documents"
     actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
@@ -163,28 +145,24 @@ data "aws_iam_policy_document" "core_service" {
     ]
   }
 
-  # EventBridge: publish shipment lifecycle events
   statement {
     sid       = "EventBridgePublish"
     actions   = ["events:PutEvents"]
     resources = [var.event_bus_arn]
   }
 
-  # SQS: publish compliance trigger messages to compliance queue
   statement {
     sid       = "SQSCompliancePublish"
     actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes"]
     resources = [var.compliance_queue_arn]
   }
 
-  # Secrets Manager: read DB and application secrets
   statement {
     sid       = "SecretsRead"
     actions   = ["secretsmanager:GetSecretValue"]
     resources = [var.db_secret_arn, var.app_secret_arn]
   }
 
-  # KMS: decrypt secrets and S3 objects
   statement {
     sid       = "KMSDecrypt"
     actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
@@ -198,9 +176,6 @@ resource "aws_iam_role_policy" "core_service" {
   policy = data.aws_iam_policy_document.core_service.json
 }
 
-# \u2500\u2500\u2500 Document Service permissions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-# document-service: upload/retrieve documents, optionally call Textract
-
 data "aws_iam_policy_document" "document_service" {
   statement {
     sid     = "S3FullDocuments"
@@ -211,7 +186,6 @@ data "aws_iam_policy_document" "document_service" {
     ]
   }
 
-  # Textract: extract fields from uploaded documents
   statement {
     sid = "TextractAccess"
     actions = [
@@ -219,7 +193,7 @@ data "aws_iam_policy_document" "document_service" {
       "textract:StartDocumentAnalysis",
       "textract:GetDocumentAnalysis",
     ]
-    resources = ["*"] # Textract does not support resource-level permissions
+    resources = ["*"]
   }
 
   statement {
@@ -235,11 +209,7 @@ resource "aws_iam_role_policy" "document_service" {
   policy = data.aws_iam_policy_document.document_service.json
 }
 
-# \u2500\u2500\u2500 AI Service permissions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-# ai-service: consume compliance queue, call Bedrock, call Textract, write DynamoDB audit
-
 data "aws_iam_policy_document" "ai_service" {
-  # SQS: poll and delete from compliance trigger queue
   statement {
     sid = "SQSComplianceConsume"
     actions = [
@@ -251,7 +221,6 @@ data "aws_iam_policy_document" "ai_service" {
     resources = [var.compliance_queue_arn]
   }
 
-  # Bedrock: invoke Nova Pro model for compliance analysis
   statement {
     sid     = "BedrockInvoke"
     actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
@@ -261,7 +230,6 @@ data "aws_iam_policy_document" "ai_service" {
     ]
   }
 
-  # Textract: extract fields from PDF/image documents
   statement {
     sid = "TextractAccess"
     actions = [
@@ -272,21 +240,18 @@ data "aws_iam_policy_document" "ai_service" {
     resources = ["*"]
   }
 
-  # S3: read documents for Textract extraction
   statement {
     sid       = "S3ReadDocuments"
     actions   = ["s3:GetObject"]
     resources = ["${var.documents_bucket_arn}/*"]
   }
 
-  # DynamoDB: write compliance audit events
   statement {
     sid       = "DynamoDBAuditWrite"
     actions   = ["dynamodb:PutItem", "dynamodb:GetItem"]
     resources = [var.audit_table_arn]
   }
 
-  # KMS: decrypt SQS messages, S3 objects, DynamoDB data
   statement {
     sid       = "KMSDecrypt"
     actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
@@ -299,10 +264,6 @@ resource "aws_iam_role_policy" "ai_service" {
   role   = aws_iam_role.ai_service.id
   policy = data.aws_iam_policy_document.ai_service.json
 }
-
-# ─── AWS Load Balancer Controller permissions ───────────────────────────────
-# Permissions match the official AWS LBC v2.7+ IAM policy:
-# https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
 
 data "aws_iam_policy_document" "alb_controller" {
   statement {
@@ -317,7 +278,7 @@ data "aws_iam_policy_document" "alb_controller" {
       "ec2:DescribeVpcPeeringConnections",
       "ec2:DescribeSubnets",
       "ec2:DescribeSecurityGroups",
-      "ec2:DescribeSecurityGroupRules", # Required by LBC v2.7+ for SG rule management
+      "ec2:DescribeSecurityGroupRules",
       "ec2:DescribeInstances",
       "ec2:DescribeNetworkInterfaces",
       "ec2:DescribeTags",
@@ -420,12 +381,6 @@ resource "aws_iam_role_policy" "alb_controller" {
   policy = data.aws_iam_policy_document.alb_controller.json
 }
 
-# ─── Cluster Autoscaler IRSA ──────────────────────────────────────────────────
-# The node group in modules/eks already has the required discovery tags:
-#   k8s.io/cluster-autoscaler/enabled             = "true"
-#   k8s.io/cluster-autoscaler/<cluster_name>       = "owned"
-# This role is consumed by the cluster-autoscaler Helm chart service account.
-
 data "aws_iam_policy_document" "cluster_autoscaler_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -454,7 +409,6 @@ resource "aws_iam_role" "cluster_autoscaler" {
 }
 
 data "aws_iam_policy_document" "cluster_autoscaler" {
-  # Read permissions — discover node groups and their current state
   statement {
     sid = "AutoscalerDescribe"
     actions = [
@@ -472,7 +426,6 @@ data "aws_iam_policy_document" "cluster_autoscaler" {
     resources = ["*"]
   }
 
-  # Write permissions — scale node groups; scoped to this cluster's tagged ASGs
   statement {
     sid = "AutoscalerModify"
     actions = [
@@ -494,14 +447,6 @@ resource "aws_iam_role_policy" "cluster_autoscaler" {
   policy = data.aws_iam_policy_document.cluster_autoscaler.json
 }
 
-# ─── External Secrets Operator (ESO) IRSA ────────────────────────────────────
-# ESO runs in the external-secrets namespace and uses this role to read secrets
-# from AWS Secrets Manager and configuration values from SSM Parameter Store.
-# The role is scoped to the ESO controller ServiceAccount (least privilege).
-#
-# ESO uses IRSA — no static credentials required in the cluster.
-# The ClusterSecretStore CR (in k8s.tf) references this ServiceAccount.
-
 data "aws_iam_policy_document" "eso_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -510,7 +455,6 @@ data "aws_iam_policy_document" "eso_assume" {
       type        = "Federated"
       identifiers = [var.oidc_provider_arn]
     }
-    # Trust the ESO controller ServiceAccount in the external-secrets namespace
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
@@ -531,8 +475,6 @@ resource "aws_iam_role" "eso" {
 }
 
 data "aws_iam_policy_document" "eso" {
-  # Read all CargoTrack secrets from Secrets Manager
-  # Scoped to cargotrack-* secrets only — no other secrets can be read
   statement {
     sid     = "SecretsManagerRead"
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
@@ -541,8 +483,6 @@ data "aws_iam_policy_document" "eso" {
     ]
   }
 
-  # Read all CargoTrack operational config from SSM Parameter Store
-  # Scoped to /cargotrack/* hierarchy only
   statement {
     sid = "SSMParameterRead"
     actions = [
@@ -555,7 +495,6 @@ data "aws_iam_policy_document" "eso" {
     ]
   }
 
-  # KMS: decrypt Secrets Manager values encrypted with the CargoTrack CMK
   statement {
     sid       = "KMSDecrypt"
     actions   = ["kms:Decrypt"]

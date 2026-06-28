@@ -4,7 +4,6 @@ locals {
     ManagedBy = "Terraform"
   }
 
-  # Repositories to create — one per microservice image
   repositories = {
     frontend = {
       name        = "${var.project_name}-frontend"
@@ -30,13 +29,13 @@ resource "aws_ecr_repository" "this" {
   for_each = local.repositories
 
   name                 = each.value.name
-  image_tag_mutability = "MUTABLE" # allow :latest overwrites during dev; switch to IMMUTABLE for prod
+  image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
-    scan_on_push = true # automatically scan for known CVEs on every push
+    scan_on_push = true
   }
 
-  force_delete = true # allow destroy even when images exist (safe for dev/CI)
+  force_delete = true
 
   tags = merge(
     local.common_tags,
@@ -47,10 +46,6 @@ resource "aws_ecr_repository" "this" {
   )
 }
 
-# Lifecycle policy — keep the 10 most-recent images (any tag) per repository.
-# Untagged images (layer cache blobs) are expired after 1 day to control storage costs.
-# NOTE: tagStatus = "any" protects SHA-tagged images from CI (e.g. abc1234...)
-#       as well as semver-tagged images (e.g. v1.0.0). Both are retained.
 resource "aws_ecr_lifecycle_policy" "this" {
 
   for_each = aws_ecr_repository.this
@@ -85,12 +80,6 @@ resource "aws_ecr_lifecycle_policy" "this" {
 }
 
 
-# ─── ECR Pull-through / cross-account access (optional) ───────────────────────
-# Grants EKS node role permission to pull images from all CargoTrack repos.
-# This supplements the AmazonEC2ContainerRegistryReadOnly managed policy
-# already attached in modules/eks/main.tf, and explicitly scopes it to this
-# account's CargoTrack repositories.
-
 data "aws_caller_identity" "current" {}
 
 data "aws_iam_policy_document" "ecr_pull" {
@@ -123,23 +112,10 @@ resource "aws_ecr_repository_policy" "this" {
   policy = data.aws_iam_policy_document.ecr_pull.json
 }
 
-# ─── GitHub Actions OIDC — ECR Push Role ─────────────────────────────────────
-# Allows GitHub Actions to assume this role via OIDC and push images to ECR.
-# No long-lived AWS access keys are stored in GitHub — the OIDC token is
-# exchanged for temporary credentials at workflow runtime.
-#
-# Trust is scoped to:
-#   - The exact GitHub repository: var.github_repository
-#   - The specific branch(es): var.github_branch (default "*" = any branch)
-#
-# After terraform apply:
-#   terraform output github_actions_ecr_role_arn
-# Set the output value as the GitHub secret: AWS_ECR_PUSH_ROLE_ARN
-
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"] # GitHub OIDC thumbprint (stable, documented by AWS)
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 
   tags = merge(
     local.common_tags,
@@ -157,7 +133,6 @@ data "aws_iam_policy_document" "github_actions_assume" {
       identifiers = [aws_iam_openid_connect_provider.github.arn]
     }
 
-    # Scope trust to the exact repository — prevents other GitHub repos from assuming this role
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
@@ -183,14 +158,12 @@ resource "aws_iam_role" "github_actions_ecr" {
 }
 
 data "aws_iam_policy_document" "github_actions_ecr" {
-  # Login token — required before any push or pull
   statement {
     sid       = "ECRGetAuthToken"
     actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"] # GetAuthorizationToken is account-level, not resource-level
+    resources = ["*"]
   }
 
-  # Push permissions — scoped to CargoTrack ECR repositories only
   statement {
     sid = "ECRPush"
     actions = [
@@ -212,9 +185,6 @@ resource "aws_iam_role_policy" "github_actions_ecr" {
   policy = data.aws_iam_policy_document.github_actions_ecr.json
 }
 
-# ─── GitHub Actions Terraform Permissions ─────────────────────────────────────
-# The CI/CD infra pipeline uses this role to run `terraform plan` and `terraform apply`.
-# `terraform apply` requires full permissions to provision EKS, RDS, VPC, IAM, etc.
 resource "aws_iam_role_policy_attachment" "github_actions_terraform_admin" {
   role       = aws_iam_role.github_actions_ecr.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
