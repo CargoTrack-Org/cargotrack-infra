@@ -535,38 +535,6 @@ resource "kubectl_manifest" "external_secret_prod" {
   ]
 }
 
-resource "null_resource" "pre_destroy_ingress_cleanup" {
-  triggers = {
-    cluster_name = module.eks.cluster_name
-    aws_region   = var.aws_region
-    ns_dev       = "cargotrack-dev"
-    ns_prod      = "cargotrack-prod"
-  }
-
-  provisioner "local-exec" {
-    when        = destroy
-    interpreter = ["powershell", "-Command"]
-    command     = <<-EOT
-      Write-Host "[pre-destroy] Configuring kubectl for ${self.triggers.cluster_name}..."
-      aws eks update-kubeconfig --name "${self.triggers.cluster_name}" --region "${self.triggers.aws_region}" --kubeconfig "$env:TEMP\cargotrack-kube-destroy.conf" 2>$null
-      $env:KUBECONFIG = "$env:TEMP\cargotrack-kube-destroy.conf"
-
-      Write-Host "[pre-destroy] Deleting Ingress resources in ${self.triggers.ns_dev}..."
-      kubectl delete ingress --all -n "${self.triggers.ns_dev}" --timeout=120s --ignore-not-found=true 2>$null
-
-      Write-Host "[pre-destroy] Deleting Ingress resources in ${self.triggers.ns_prod}..."
-      kubectl delete ingress --all -n "${self.triggers.ns_prod}" --timeout=120s --ignore-not-found=true 2>$null
-
-      Write-Host "[pre-destroy] Waiting 90s for AWS to release ALB Elastic IPs..."
-      Start-Sleep -Seconds 90
-      Write-Host "[pre-destroy] Ingress cleanup complete."
-    EOT
-  }
-
-  depends_on = [
-    helm_release.argocd,
-  ]
-}
 
 resource "kubectl_manifest" "argocd_root_app" {
   yaml_body = <<-YAML
@@ -604,6 +572,5 @@ resource "kubectl_manifest" "argocd_root_app" {
     kubernetes_secret.cargotrack_secrets_prod,
     kubectl_manifest.external_secret_dev,
     kubectl_manifest.external_secret_prod,
-    null_resource.pre_destroy_ingress_cleanup,
   ]
 }
